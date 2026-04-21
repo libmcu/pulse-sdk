@@ -1,0 +1,234 @@
+name: CI
+
+on:
+  pull_request:
+    branches: ["**"]
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+
+jobs:
+  unit-test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache CMake dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: cmake-deps-${{ runner.os }}-${{ hashFiles('pulse-sdk.cmake') }}
+          restore-keys: cmake-deps-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake g++ autoconf automake libtool
+
+      - name: Install CppUTest
+        run: make -C tests install
+
+      - name: Configure
+        run: |
+          cmake -B build \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+  build-linux:
+    name: Build / Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache CMake dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: cmake-deps-${{ runner.os }}-${{ hashFiles('pulse-sdk.cmake') }}
+          restore-keys: cmake-deps-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc) --target example_pulse_linux
+
+  build-generic-cmake:
+    name: Build / Generic CMake
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache CMake dependencies
+        uses: actions/cache@v4
+        with:
+          path: examples/generic-cmake/build/_deps
+          key: cmake-deps-${{ runner.os }}-${{ hashFiles('pulse-sdk.cmake') }}
+          restore-keys: cmake-deps-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake
+
+      - name: Configure
+        run: |
+          cmake -B examples/generic-cmake/build \
+            -S examples/generic-cmake \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build examples/generic-cmake/build --parallel $(nproc)
+
+  build-baremetal:
+    name: Build / Baremetal
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gcc-arm-none-eabi libnewlib-arm-none-eabi
+
+      - name: Resolve dependencies
+        run: |
+          [ -d external/libmcu ] || \
+            git clone --depth=1 https://github.com/libmcu/libmcu.git external/libmcu
+          [ -d external/cbor ] || \
+            git clone --depth=1 https://github.com/libmcu/cbor.git external/cbor
+
+      - name: Build (arm-none-eabi cross-compile)
+        run: |
+          make -C examples/baremetal \
+            CC=arm-none-eabi-gcc \
+            CFLAGS="-mcpu=cortex-m4 -mthumb" \
+            LDFLAGS="-lnosys"
+
+  build-esp-idf:
+    name: Build / ESP-IDF
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: components/pulse-sdk
+          submodules: recursive
+
+      - name: Copy example to project root
+        run: cp -r components/pulse-sdk/examples/esp-idf/* .
+
+      - name: Build with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0
+          target: esp32
+          path: .
+
+  build-zephyr:
+    name: Build / Zephyr
+    runs-on: ubuntu-latest
+    container: ghcr.io/zephyrproject-rtos/ci:v0.28.7
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: zephyr-workspace/modules/lib/pulse-sdk
+
+      - name: Prepare
+        run: |
+          git config --system --add safe.directory '*'
+          echo "ZEPHYR_TOOLCHAIN_VARIANT=zephyr" >> $GITHUB_ENV
+
+      - name: Prepare example app workspace
+        run: |
+          mkdir -p zephyr-workspace/app
+          cp -r zephyr-workspace/modules/lib/pulse-sdk/examples/zephyr/app/. zephyr-workspace/app/
+
+      - name: Initialize west workspace
+        working-directory: zephyr-workspace
+        run: |
+          west init -l app --mf west.yml
+          west update zephyr
+          west zephyr-export
+          echo "ZEPHYR_BASE=${PWD}/zephyr" >> $GITHUB_ENV
+
+      - name: Install Zephyr Python dependencies
+        working-directory: zephyr-workspace
+        run: pip install -r zephyr/scripts/requirements-base.txt
+
+      - name: Install Zephyr SDK
+        working-directory: zephyr-workspace
+        run: |
+          ZSDK_VERSION="$(cat zephyr/SDK_VERSION)"
+          echo "Using Zephyr SDK version ${ZSDK_VERSION}"
+          west sdk install --version "${ZSDK_VERSION}" --install-base /opt/toolchains
+          echo "ZSDK_VERSION=${ZSDK_VERSION}" >> $GITHUB_ENV
+          echo "ZEPHYR_SDK_INSTALL_DIR=/opt/toolchains/zephyr-sdk-${ZSDK_VERSION}" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=/opt/toolchains/zephyr-sdk-${ZSDK_VERSION}" >> $GITHUB_ENV
+
+      - name: Build for native_sim
+        working-directory: zephyr-workspace/app
+        run: west build -b native_sim .
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - unit-test
+      - build-linux
+      - build-generic-cmake
+      - build-baremetal
+      - build-esp-idf
+      - build-zephyr
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract tag version
+        run: echo "TAG_VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+
+      - name: Verify version header matches tag
+        run: |
+          MAJOR=$(grep '#define PULSE_VERSION_MAJOR' include/pulse/version.h | awk '{print $3}')
+          MINOR=$(grep '#define PULSE_VERSION_MINOR' include/pulse/version.h | awk '{print $3}')
+          PATCH=$(grep '#define PULSE_VERSION_BUILD' include/pulse/version.h | awk '{print $3}')
+          HEADER_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          if [ "${HEADER_VERSION}" != "${{ env.TAG_VERSION }}" ]; then
+            echo "Version mismatch: tag=v${{ env.TAG_VERSION }}, header=${HEADER_VERSION}"
+            exit 1
+          fi
+          echo "Version match confirmed: ${HEADER_VERSION}"
+
+      - name: Create GitHub Release
+        run: |
+          gh release create v${{ env.TAG_VERSION }} \
+            --title "v${{ env.TAG_VERSION }}" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

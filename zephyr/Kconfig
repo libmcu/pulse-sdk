@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+
+menuconfig PULSE_SDK
+	bool "pulse-sdk"
+	default y
+	help
+	  Pulse SDK module support.
+
+config PULSE_SDK_METRICS_USER_DEFINES
+	string "User metrics definition file path"
+	depends on PULSE_SDK
+	default "include/metrics.def"
+	help
+	  Path to the user-supplied metrics definition file.
+	  Set this to the path that should be passed as METRICS_USER_DEFINES.
+	  The default follows the libmcu Zephyr integration convention.
