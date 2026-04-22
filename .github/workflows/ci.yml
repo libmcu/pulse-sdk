@@ -182,12 +182,14 @@ jobs:
         working-directory: zephyr-workspace
         run: pip install -r zephyr/scripts/requirements-base.txt
 
-      - name: Install Zephyr SDK
+      - name: Install Zephyr SDK (authenticated)
         working-directory: zephyr-workspace
         run: |
           ZSDK_VERSION="$(cat zephyr/SDK_VERSION)"
           echo "Using Zephyr SDK version ${ZSDK_VERSION}"
-          west sdk install --version "${ZSDK_VERSION}" --install-base /opt/toolchains
+          # Set repository secret ZEPHYR_SDK_PAT to override GITHUB_TOKEN if higher API limits are needed.
+          ZSDK_PAT="${{ secrets.ZEPHYR_SDK_PAT || secrets.GITHUB_TOKEN }}"
+          west sdk install --version "${ZSDK_VERSION}" --install-base /opt/toolchains --personal-access-token "${ZSDK_PAT}"
           echo "ZSDK_VERSION=${ZSDK_VERSION}" >> $GITHUB_ENV
           echo "ZEPHYR_SDK_INSTALL_DIR=/opt/toolchains/zephyr-sdk-${ZSDK_VERSION}" >> $GITHUB_ENV
           echo "CMAKE_PREFIX_PATH=/opt/toolchains/zephyr-sdk-${ZSDK_VERSION}" >> $GITHUB_ENV
