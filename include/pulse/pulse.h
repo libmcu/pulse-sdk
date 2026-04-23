@@ -48,6 +48,10 @@ typedef enum {
 	 * on the metricfs instance, then call pulse_report() again. */
 	PULSE_STATUS_BACKLOG_OVERFLOW	= -10,
 	PULSE_STATUS_NO_MEMORY		= -11,
+	/* metrics_report_transmit() returned -EAGAIN because an async
+	 * transport is still in progress. The caller must invoke pulse_report()
+	 * again to advance the transfer. No backlog entry was written. */
+	PULSE_STATUS_IN_PROGRESS	= -12,
 } pulse_status_t;
 
 struct pulse {
@@ -77,6 +81,13 @@ struct pulse {
 	bool reset_metrics_on_init; /**< When true, resets all metric counters
 			during pulse_init(). Set to false (default) to preserve
 			accumulated metric values across re-initialisation. */
+	bool async_transport; /**< When true, metrics_report_transmit() may
+			return -EAGAIN to signal that an async transfer is still
+			in progress; pulse_report() then returns
+			PULSE_STATUS_IN_PROGRESS and the caller must call
+			pulse_report() again to advance the transfer.
+			When false (default), the transport blocks internally
+			until the transfer completes before returning. */
 };
 
 /**

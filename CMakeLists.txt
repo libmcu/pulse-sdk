@@ -85,7 +85,9 @@ if(BUILD_TESTING)
 		tests/mocks/esp_http_client_mock.cpp
 		ports/esp-idf/pulse_transport_https.c)
 	target_compile_definitions(test_pulse_transport_https_esp_idf
-		PRIVATE METRICS_USER_DEFINES="${CMAKE_CURRENT_SOURCE_DIR}/examples/metrics.def"
+		PRIVATE
+		METRICS_USER_DEFINES="${CMAKE_CURRENT_SOURCE_DIR}/examples/metrics.def"
+		UNIT_TEST
 	)
 	target_include_directories(test_pulse_transport_https_esp_idf PRIVATE
 		${CMAKE_CURRENT_SOURCE_DIR}/tests/mocks)

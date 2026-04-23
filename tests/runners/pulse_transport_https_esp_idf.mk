@@ -14,13 +14,14 @@ INCLUDE_DIRS = \
 	$(CPPUTEST_HOME)/include \
 	../include \
 	$(LIBMCU_ROOT)/modules/metrics/include \
+	$(LIBMCU_ROOT)/modules/common/include \
 	$(LIBMCU_ROOT)/interfaces/kvstore/include \
 	mocks \
 
 MOCKS_SRC_DIRS =
 
 CPPUTEST_CPPFLAGS = \
-	-include $(LIBMCU_ROOT)/modules/metrics/include/libmcu/metrics_overrides.h \
-	-DMETRICS_USER_DEFINES=\"../examples/metrics.def\"
+	-include $(abspath $(LIBMCU_ROOT)/modules/metrics/include/libmcu/metrics_overrides.h) \
+	-DMETRICS_USER_DEFINES=\"$(abspath ../examples/metrics.def)\"
 
 include runners/MakefileRunner

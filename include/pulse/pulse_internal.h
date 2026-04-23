@@ -21,10 +21,19 @@ struct pulse_report_ctx {
 	void *user_ctx;
 	struct pulse conf;
 
-	bool initialized;
-
 	pulse_response_handler_t on_response;
 	void *response_ctx;
+
+	uint64_t last_report_time;
+
+	uint8_t *flight_buf;
+	size_t flight_len;
+	size_t flight_bufsize;
+	bool flight_from_store;
+	bool in_flight;
+
+	bool initialized;
+	bool periodic_initialized;
 };
 
 const struct pulse_report_ctx *pulse_get_report_ctx(void);

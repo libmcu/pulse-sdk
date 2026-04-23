@@ -9,7 +9,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdint.h>
-#include <stdlib.h>
+#include <string.h>
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
@@ -22,6 +22,41 @@
 #define PULSE_HTTPS_BUFFER_SIZE		4096
 #define PULSE_HTTPS_CONTENT_TYPE	"application/cbor"
 
+typedef enum {
+	STATE_IDLE,
+	STATE_IN_PROGRESS,
+} https_state_t;
+
+typedef struct {
+	uint8_t buf[PULSE_HTTPS_BUFFER_SIZE];
+	size_t len;
+} response_buf_t;
+
+typedef struct {
+	esp_http_client_handle_t client;
+	response_buf_t response;
+	https_state_t state;
+} https_session_t;
+
+static https_session_t m_session;
+
+static esp_err_t on_http_event(esp_http_client_event_t *evt)
+{
+	if (evt->event_id != HTTP_EVENT_ON_DATA) {
+		return ESP_OK;
+	}
+
+	response_buf_t *rb = (response_buf_t *)evt->user_data;
+	size_t remaining = sizeof(rb->buf) - rb->len;
+	size_t to_copy = (size_t)evt->data_len < remaining
+			? (size_t)evt->data_len : remaining;
+
+	memcpy(rb->buf + rb->len, evt->data, to_copy);
+	rb->len += to_copy;
+
+	return ESP_OK;
+}
+
 static int map_esp_error(esp_err_t err)
 {
 	if (err == ESP_OK) {
@@ -32,10 +67,15 @@ static int map_esp_error(esp_err_t err)
 		return -ETIMEDOUT;
 	}
 
+	if (err == ESP_ERR_HTTP_EAGAIN) {
+		return -EAGAIN;
+	}
+
 	return -EIO;
 }
 
-static esp_http_client_handle_t build_http_client(void)
+static esp_http_client_handle_t create_client(response_buf_t *rb,
+		bool is_async)
 {
 	const esp_http_client_config_t config = {
 		.url = PULSE_INGEST_URL_HTTPS,
@@ -43,6 +83,9 @@ static esp_http_client_handle_t build_http_client(void)
 		.buffer_size = PULSE_HTTPS_BUFFER_SIZE,
 		.buffer_size_tx = PULSE_HTTPS_BUFFER_SIZE,
 		.crt_bundle_attach = esp_crt_bundle_attach,
+		.event_handler = on_http_event,
+		.user_data = rb,
+		.is_async = is_async,
 	};
 
 	return esp_http_client_init(&config);
@@ -61,7 +104,7 @@ static esp_err_t set_auth_header(esp_http_client_handle_t client,
 	return esp_http_client_set_header(client, "Authorization", auth);
 }
 
-static esp_err_t configure_http_request(esp_http_client_handle_t client,
+static esp_err_t configure_request(esp_http_client_handle_t client,
 		const void *data, size_t datasize, const struct pulse *conf)
 {
 	esp_err_t err;
@@ -88,8 +131,7 @@ static esp_err_t configure_http_request(esp_http_client_handle_t client,
 			(int)datasize);
 }
 
-static int process_http_response(esp_http_client_handle_t client,
-		const struct pulse_report_ctx *rctx)
+static int check_response_status(esp_http_client_handle_t client)
 {
 	int status_code = esp_http_client_get_status_code(client);
 
@@ -97,41 +139,101 @@ static int process_http_response(esp_http_client_handle_t client,
 		return -EIO;
 	}
 
-	int64_t content_length = esp_http_client_get_content_length(client);
+	return 0;
+}
 
-	uint8_t *response = (uint8_t *)malloc(PULSE_HTTPS_BUFFER_SIZE);
-	if (response == NULL) {
+static void deliver_response(const response_buf_t *rb,
+		const struct pulse_report_ctx *rctx)
+{
+	if (rb->len > 0 && rctx != NULL && rctx->on_response != NULL) {
+		rctx->on_response(rb->buf, rb->len, rctx->response_ctx);
+	}
+}
+
+static void reset_session(https_session_t *s)
+{
+	s->client = NULL;
+	s->state = STATE_IDLE;
+	memset(&s->response, 0, sizeof(s->response));
+}
+
+static int finalize_session(https_session_t *s,
+		const struct pulse_report_ctx *rctx)
+{
+	int ret = check_response_status(s->client);
+
+	if (ret == 0) {
+		deliver_response(&s->response, rctx);
+	}
+
+	esp_err_t cleanup_err = esp_http_client_cleanup(s->client);
+	reset_session(s);
+
+	if (ret == 0) {
+		ret = map_esp_error(cleanup_err);
+	}
+
+	return ret;
+}
+
+static int start_session(https_session_t *s, const void *data, size_t datasize,
+		const struct pulse_report_ctx *rctx, bool async)
+{
+	const struct pulse *conf = rctx ? &rctx->conf : NULL;
+
+	s->client = create_client(&s->response, async);
+	if (s->client == NULL) {
 		return -ENOMEM;
 	}
 
-	int response_len = esp_http_client_read_response(client,
-			(char *)response, PULSE_HTTPS_BUFFER_SIZE);
-
-	if (response_len < 0) {
-		free(response);
-		return -EIO;
+	esp_err_t err = configure_request(s->client, data, datasize, conf);
+	if (err != ESP_OK) {
+		esp_http_client_cleanup(s->client);
+		reset_session(s);
+		return map_esp_error(err);
 	}
 
-	if (content_length > 0 && (int64_t)response_len < content_length) {
-		free(response);
-		return -EMSGSIZE;
-	}
+	s->state = STATE_IN_PROGRESS;
 
-	if (response_len > 0 && rctx != NULL && rctx->on_response != NULL) {
-		rctx->on_response(response, (size_t)response_len,
-				rctx->response_ctx);
-	}
-
-	free(response);
 	return 0;
 }
+
+static int advance_session(https_session_t *s,
+		const struct pulse_report_ctx *rctx, bool async)
+{
+	esp_err_t err;
+
+	do {
+		err = esp_http_client_perform(s->client);
+	} while (!async && err == ESP_ERR_HTTP_EAGAIN);
+
+	if (err == ESP_ERR_HTTP_EAGAIN) {
+		return -EINPROGRESS;
+	}
+
+	if (err != ESP_OK) {
+		esp_http_client_cleanup(s->client);
+		reset_session(s);
+		return map_esp_error(err);
+	}
+
+	return finalize_session(s, rctx);
+}
+
+int metrics_report_transmit(const void *data, size_t datasize, void *ctx);
+
+#ifdef UNIT_TEST
+void metrics_report_reset(void);
+
+void metrics_report_reset(void)
+{
+	reset_session(&m_session);
+}
+#endif
 
 int metrics_report_transmit(const void *data, size_t datasize, void *ctx)
 {
 	(void)ctx;
-	const struct pulse_report_ctx *rctx = pulse_get_report_ctx();
-	const struct pulse *conf = rctx ? &rctx->conf : NULL;
-	int ret;
 
 	if (data == NULL || datasize == 0u) {
 		return -EINVAL;
@@ -141,24 +243,15 @@ int metrics_report_transmit(const void *data, size_t datasize, void *ctx)
 		return -EOVERFLOW;
 	}
 
-	esp_http_client_handle_t client = build_http_client();
-	if (client == NULL) {
-		return -ENOMEM;
+	const struct pulse_report_ctx *rctx = pulse_get_report_ctx();
+	const bool async = rctx && rctx->conf.async_transport;
+
+	if (m_session.state == STATE_IDLE) {
+		int ret = start_session(&m_session, data, datasize, rctx, async);
+		if (ret != 0) {
+			return ret;
+		}
 	}
 
-	ret = map_esp_error(configure_http_request(client, data, datasize,
-			conf));
-	if (ret == 0) {
-		ret = map_esp_error(esp_http_client_perform(client));
-	}
-	if (ret == 0) {
-		ret = process_http_response(client, rctx);
-	}
-
-	esp_err_t cleanup_err = esp_http_client_cleanup(client);
-	if (ret == 0) {
-		ret = map_esp_error(cleanup_err);
-	}
-
-	return ret;
+	return advance_session(&m_session, rctx, async);
 }
