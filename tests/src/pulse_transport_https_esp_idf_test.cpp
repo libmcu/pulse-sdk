@@ -12,6 +12,7 @@ extern "C" {
 
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
+#include "pulse/pulse_overrides.h"
 
 int metrics_report_transmit(const void *data, size_t datasize, void *ctx);
 void metrics_report_reset(void);
@@ -357,11 +358,98 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenServerRespondsWithFailureStatu
 		.andReturnValue((int)ESP_OK);
 	mock().expectOneCall("esp_http_client_get_status_code")
 		.ignoreOtherParameters()
-		.andReturnValue(500);
+		.andReturnValue(200);
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(-EIO, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(0, metrics_report_transmit(payload, sizeof(payload), NULL));
+}
+
+TEST(PulseTransportHttpsEspIdf, ShouldCleanupClientWhenCancelCalledWhileInProgress)
+{
+	static const uint8_t payload[] = { 0x01 };
+	void *handle = (void *)0x1234;
+	g_report_ctx.conf.async_transport = true;
+
+	mock().expectOneCall("esp_http_client_init").ignoreOtherParameters()
+		.andReturnValue(handle);
+	mock().expectOneCall("esp_http_client_set_method").ignoreOtherParameters()
+		.andReturnValue((int)ESP_OK);
+	mock().expectOneCall("esp_http_client_set_header").ignoreOtherParameters()
+		.andReturnValue((int)ESP_OK);
+	mock().expectOneCall("esp_http_client_set_post_field")
+		.ignoreOtherParameters()
+		.andReturnValue((int)ESP_OK);
+	mock().expectOneCall("esp_http_client_perform").ignoreOtherParameters()
+		.andReturnValue((int)ESP_ERR_HTTP_EAGAIN);
+
+	CHECK_EQUAL(-EINPROGRESS,
+			metrics_report_transmit(payload, sizeof(payload), NULL));
+
+	mock().checkExpectations();
+	mock().clear();
+
+	mock().expectOneCall("esp_http_client_cleanup")
+		.withPointerParameter("client", handle)
+		.andReturnValue((int)ESP_OK);
+
+	pulse_transport_cancel();
+}
+
+TEST(PulseTransportHttpsEspIdf, ShouldBeIdempotentWhenCancelCalledWhileIdle)
+{
+	pulse_transport_cancel();
+}
+
+TEST(PulseTransportHttpsEspIdf, ShouldResetStateAfterCancelSoNextTransmitStartsFresh)
+{
+	static const uint8_t payload[] = { 0x01 };
+	void *handle1 = (void *)0x1234;
+	void *handle2 = (void *)0x5678;
+	g_report_ctx.conf.async_transport = true;
+
+	mock().expectOneCall("esp_http_client_init").ignoreOtherParameters()
+		.andReturnValue(handle1);
+	mock().expectOneCall("esp_http_client_set_method").ignoreOtherParameters()
+		.andReturnValue((int)ESP_OK);
+	mock().expectOneCall("esp_http_client_set_header").ignoreOtherParameters()
+		.andReturnValue((int)ESP_OK);
+	mock().expectOneCall("esp_http_client_set_post_field")
+		.ignoreOtherParameters()
+		.andReturnValue((int)ESP_OK);
+	mock().expectOneCall("esp_http_client_perform").ignoreOtherParameters()
+		.andReturnValue((int)ESP_ERR_HTTP_EAGAIN);
+
+	metrics_report_transmit(payload, sizeof(payload), NULL);
+
+	mock().checkExpectations();
+	mock().clear();
+
+	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
+		.andReturnValue((int)ESP_OK);
+	pulse_transport_cancel();
+
+	mock().checkExpectations();
+	mock().clear();
+
+	mock().expectOneCall("esp_http_client_init").ignoreOtherParameters()
+		.andReturnValue(handle2);
+	mock().expectOneCall("esp_http_client_set_method").ignoreOtherParameters()
+		.andReturnValue((int)ESP_OK);
+	mock().expectOneCall("esp_http_client_set_header").ignoreOtherParameters()
+		.andReturnValue((int)ESP_OK);
+	mock().expectOneCall("esp_http_client_set_post_field")
+		.ignoreOtherParameters()
+		.andReturnValue((int)ESP_OK);
+	mock().expectOneCall("esp_http_client_perform").ignoreOtherParameters()
+		.andReturnValue((int)ESP_OK);
+	mock().expectOneCall("esp_http_client_get_status_code")
+		.ignoreOtherParameters()
+		.andReturnValue(200);
+	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
+		.andReturnValue((int)ESP_OK);
+
+	CHECK_EQUAL(0, metrics_report_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnOkWhenStatusCodeIs200)

@@ -17,6 +17,7 @@
 #include "libmcu/metrics_overrides.h"
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
+#include "pulse/pulse_overrides.h"
 
 #define PULSE_HTTPS_TIMEOUT_MS		60000
 #define PULSE_HTTPS_BUFFER_SIZE		4096
@@ -230,6 +231,16 @@ void metrics_report_reset(void)
 	reset_session(&m_session);
 }
 #endif
+
+void pulse_transport_cancel(void)
+{
+	if (m_session.state == STATE_IDLE) {
+		return;
+	}
+
+	esp_http_client_cleanup(m_session.client);
+	reset_session(&m_session);
+}
 
 int metrics_report_transmit(const void *data, size_t datasize, void *ctx)
 {

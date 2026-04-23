@@ -851,3 +851,121 @@ TEST(PulseReport, ShouldAllowMultipleReportsWhenTimestampIsZero)
 	metrics_set(PulseMetric, METRICS_VALUE(3));
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
+
+TEST(PulseReport, ShouldReturnInvalidArgumentWhenCancelCalledWhileNotInFlight)
+{
+	CHECK_EQUAL(PULSE_STATUS_INVALID_ARGUMENT, pulse_cancel());
+}
+
+TEST(PulseReport, ShouldReturnOkWhenCancelCalledWhileInFlight)
+{
+	init_pulse_async();
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EINPROGRESS);
+
+	metrics_set(PulseMetric, METRICS_VALUE(5));
+	pulse_report();
+
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_cancel());
+}
+
+TEST(PulseReport, ShouldClearInFlightAfterCancel)
+{
+	init_pulse_async();
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EINPROGRESS);
+
+	metrics_set(PulseMetric, METRICS_VALUE(5));
+	pulse_report();
+	pulse_cancel();
+
+	CHECK_FALSE(pulse_get_report_ctx()->in_flight);
+	POINTERS_EQUAL(NULL, pulse_get_report_ctx()->flight_buf);
+}
+
+TEST(PulseReport, ShouldSaveToBacklogOnCancelWhenMfsAvailableAndNotFromStore)
+{
+	init_pulse_async_with_mfs();
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EINPROGRESS);
+
+	metrics_set(PulseMetric, METRICS_VALUE(5));
+	pulse_report();
+
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_cancel());
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+}
+
+TEST(PulseReport, ShouldNotSaveToBacklogOnCancelWhenMfsNotAvailable)
+{
+	init_pulse_async();
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EINPROGRESS);
+
+	metrics_set(PulseMetric, METRICS_VALUE(5));
+	pulse_report();
+
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_cancel());
+	CHECK_EQUAL(0u, metricfs_count(NULL));
+}
+
+TEST(PulseReport, ShouldNotSaveToBacklogOnCancelWhenFlightFromStore)
+{
+	init_pulse_async_with_mfs();
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EIO);
+
+	metrics_set(PulseMetric, METRICS_VALUE(5));
+	pulse_report();
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EINPROGRESS);
+	pulse_report();
+
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_cancel());
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+}
+
+TEST(PulseReport, ShouldAllowNewReportAfterCancel)
+{
+	init_pulse_async();
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EINPROGRESS);
+
+	metrics_set(PulseMetric, METRICS_VALUE(5));
+	pulse_report();
+	pulse_cancel();
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(10));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+}
+
+TEST(PulseReport, ShouldReturnInvalidArgumentWhenCancelCalledAfterSuccessfulReport)
+{
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	pulse_report();
+
+	CHECK_EQUAL(PULSE_STATUS_INVALID_ARGUMENT, pulse_cancel());
+}

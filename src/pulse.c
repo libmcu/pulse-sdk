@@ -6,6 +6,7 @@
 
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
+#include "pulse/pulse_overrides.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -14,6 +15,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+
+#include "libmcu/compiler.h"
 
 #if !defined(PULSE_STATIC_PAYLOAD_BUFSIZE)
 #define PULSE_STATIC_PAYLOAD_BUFSIZE	0u
@@ -134,6 +137,8 @@ static pulse_status_t map_metrics_report_error(int err)
 		return PULSE_STATUS_TOO_SOON;
 	case -EAGAIN:
 		return PULSE_STATUS_BACKLOG_PENDING;
+	case -ECANCELED:
+		return PULSE_STATUS_OK;
 	case -EINPROGRESS:
 		return PULSE_STATUS_IN_PROGRESS;
 	case -ETIMEDOUT:
@@ -207,8 +212,7 @@ static pulse_status_t commit_flight(void)
 
 	clear_in_flight();
 
-	return (err == 0) ? PULSE_STATUS_OK
-		: map_metrics_report_error(err);
+	return (err == 0) ? PULSE_STATUS_OK : map_metrics_report_error(err);
 }
 
 static pulse_status_t abort_flight(int transmit_err)
@@ -368,6 +372,19 @@ pulse_status_t pulse_report(void)
 	}
 
 	return phase_collect();
+}
+
+LIBMCU_WEAK void pulse_transport_cancel(void) {}
+
+pulse_status_t pulse_cancel(void)
+{
+	if (!m.in_flight) {
+		return PULSE_STATUS_INVALID_ARGUMENT;
+	}
+
+	pulse_transport_cancel();
+
+	return abort_flight(-ECANCELED);
 }
 
 const char *pulse_stringify_status(pulse_status_t status)
