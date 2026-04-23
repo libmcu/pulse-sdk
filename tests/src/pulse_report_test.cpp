@@ -667,8 +667,6 @@ TEST(PulseReport, ShouldReportWhenIntervalElapsedAfterRollback)
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
-
-
 TEST(PulseReport, ShouldReturnBacklogPendingWhileBacklogRemains)
 {
 	init_pulse_with_mfs();
@@ -968,6 +966,21 @@ TEST(PulseReport, ShouldAllowMultipleReportsWhenTimestampIsZero)
 
 	metrics_set(PulseMetric, METRICS_VALUE(3));
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+}
+
+TEST(PulseReport, ShouldCallTransportCancelWhenPulseCancelCalled)
+{
+	init_pulse_async();
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EINPROGRESS);
+
+	metrics_set(PulseMetric, METRICS_VALUE(5));
+	pulse_report();
+
+	pulse_cancel();
+	CHECK_EQUAL(1u, transport_cancel_calls);
 }
 
 TEST(PulseReport, ShouldReturnInvalidArgumentWhenCancelCalledWhileNotInFlight)

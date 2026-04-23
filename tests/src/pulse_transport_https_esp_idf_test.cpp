@@ -26,8 +26,6 @@ extern "C" const struct pulse_report_ctx *pulse_get_report_ctx(void)
 	return &g_report_ctx;
 }
 
-
-
 TEST_GROUP(PulseTransportHttpsEspIdf)
 {
 	void setup()
@@ -379,11 +377,11 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenServerRespondsWithFailureStatu
 		.andReturnValue((int)ESP_OK);
 	mock().expectOneCall("esp_http_client_get_status_code")
 		.ignoreOtherParameters()
-		.andReturnValue(200);
+		.andReturnValue(500);
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(0, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(-EIO, metrics_report_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldCleanupClientWhenCancelCalledWhileInProgress)

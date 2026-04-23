@@ -250,7 +250,7 @@ static pulse_status_t abort_flight(int transmit_err)
 	if (!m.flight_from_store && m.conf.mfs != NULL) {
 		metrics_report_prepare(m.user_ctx);
 		m.flight_len = metrics_collect(m.flight_buf, m.flight_bufsize);
-		if (metricfs_write(m.conf.mfs,
+		if (m.flight_len > 0u && metricfs_write(m.conf.mfs,
 				m.flight_buf, m.flight_len, NULL) == 0) {
 			metrics_reset();
 			saved_to_backlog = true;
