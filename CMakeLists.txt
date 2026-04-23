@@ -14,6 +14,7 @@ if(COMMAND idf_component_register)
 		INCLUDE_DIRS ${PULSE_SDK_PUBLIC_INCS}
 		PRIV_INCLUDE_DIRS ${PULSE_SDK_PRIVATE_INCS}
 		REQUIRES esp_http_client mbedtls
+		PRIV_REQUIRES esp_timer
 	)
 
 	target_compile_features(${COMPONENT_LIB} PRIVATE c_std_99)
@@ -83,6 +84,7 @@ if(BUILD_TESTING)
 		tests/src/test_all.cpp
 		tests/src/pulse_transport_https_esp_idf_test.cpp
 		tests/mocks/esp_http_client_mock.cpp
+		tests/mocks/esp_timer_mock.cpp
 		ports/esp-idf/pulse_transport_https.c)
 	target_compile_definitions(test_pulse_transport_https_esp_idf
 		PRIVATE

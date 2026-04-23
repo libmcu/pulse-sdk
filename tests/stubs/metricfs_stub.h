@@ -10,6 +10,7 @@ extern "C" {
 
 void metricfs_stub_reset(void);
 void metricfs_stub_prime(const void *data, size_t datasize, uint16_t count);
+void metricfs_stub_set_peek_first_error(int err);
 
 #if defined(__cplusplus)
 }

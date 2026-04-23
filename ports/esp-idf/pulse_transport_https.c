@@ -13,6 +13,7 @@
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
+#include "esp_timer.h"
 
 #include "libmcu/metrics_overrides.h"
 #include "pulse/pulse.h"
@@ -31,6 +32,7 @@ typedef enum {
 typedef struct {
 	uint8_t buf[PULSE_HTTPS_BUFFER_SIZE];
 	size_t len;
+	bool truncated;
 } response_buf_t;
 
 typedef struct {
@@ -40,6 +42,15 @@ typedef struct {
 } https_session_t;
 
 static https_session_t m_session;
+
+static uint32_t get_transmit_timeout_ms(const struct pulse *conf)
+{
+	if (conf != NULL && conf->transmit_timeout_ms > 0u) {
+		return conf->transmit_timeout_ms;
+	}
+
+	return PULSE_HTTPS_TIMEOUT_MS;
+}
 
 static esp_err_t on_http_event(esp_http_client_event_t *evt)
 {
@@ -51,6 +62,10 @@ static esp_err_t on_http_event(esp_http_client_event_t *evt)
 	size_t remaining = sizeof(rb->buf) - rb->len;
 	size_t to_copy = (size_t)evt->data_len < remaining
 			? (size_t)evt->data_len : remaining;
+
+	if ((size_t)evt->data_len > remaining) {
+		rb->truncated = true;
+	}
 
 	memcpy(rb->buf + rb->len, evt->data, to_copy);
 	rb->len += to_copy;
@@ -76,11 +91,11 @@ static int map_esp_error(esp_err_t err)
 }
 
 static esp_http_client_handle_t create_client(response_buf_t *rb,
-		bool is_async)
+		const struct pulse *conf, bool is_async)
 {
 	const esp_http_client_config_t config = {
 		.url = PULSE_INGEST_URL_HTTPS,
-		.timeout_ms = PULSE_HTTPS_TIMEOUT_MS,
+		.timeout_ms = (int)get_transmit_timeout_ms(conf),
 		.buffer_size = PULSE_HTTPS_BUFFER_SIZE,
 		.buffer_size_tx = PULSE_HTTPS_BUFFER_SIZE,
 		.crt_bundle_attach = esp_crt_bundle_attach,
@@ -163,6 +178,10 @@ static int finalize_session(https_session_t *s,
 {
 	int ret = check_response_status(s->client);
 
+	if (ret == 0 && s->response.truncated) {
+		ret = -EMSGSIZE;
+	}
+
 	if (ret == 0) {
 		deliver_response(&s->response, rctx);
 	}
@@ -182,7 +201,7 @@ static int start_session(https_session_t *s, const void *data, size_t datasize,
 {
 	const struct pulse *conf = rctx ? &rctx->conf : NULL;
 
-	s->client = create_client(&s->response, async);
+	s->client = create_client(&s->response, conf, async);
 	if (s->client == NULL) {
 		return -ENOMEM;
 	}
@@ -202,11 +221,24 @@ static int start_session(https_session_t *s, const void *data, size_t datasize,
 static int advance_session(https_session_t *s,
 		const struct pulse_report_ctx *rctx, bool async)
 {
+	const struct pulse *conf = rctx ? &rctx->conf : NULL;
+	const uint64_t timeout_us =
+		(uint64_t)get_transmit_timeout_ms(conf) * 1000u;
+	const uint64_t start_us = async ? 0u : (uint64_t)esp_timer_get_time();
 	esp_err_t err;
 
 	do {
 		err = esp_http_client_perform(s->client);
+		if (((uint64_t)esp_timer_get_time() - start_us) >= timeout_us) {
+			break;
+		}
 	} while (!async && err == ESP_ERR_HTTP_EAGAIN);
+
+	if (!async && err == ESP_ERR_HTTP_EAGAIN) {
+		esp_http_client_cleanup(s->client);
+		reset_session(s);
+		return -ETIMEDOUT;
+	}
 
 	if (err == ESP_ERR_HTTP_EAGAIN) {
 		return -EINPROGRESS;

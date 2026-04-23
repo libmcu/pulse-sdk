@@ -8,6 +8,7 @@ SRC_FILES = \
 TEST_SRC_FILES = \
 	src/pulse_transport_https_esp_idf_test.cpp \
 	src/test_all.cpp \
+	mocks/esp_timer_mock.cpp \
 	mocks/esp_http_client_mock.cpp \
 
 INCLUDE_DIRS = \

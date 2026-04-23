@@ -14,12 +14,14 @@
 static uint8_t stored_data[1024];
 static size_t stored_size;
 static uint16_t stored_count;
+static int peek_first_error;
 
 void metricfs_stub_reset(void)
 {
 	memset(stored_data, 0, sizeof(stored_data));
 	stored_size = 0;
 	stored_count = 0;
+	peek_first_error = 0;
 }
 
 void metricfs_stub_prime(const void *data, size_t datasize, uint16_t count)
@@ -32,6 +34,11 @@ void metricfs_stub_prime(const void *data, size_t datasize, uint16_t count)
 	}
 
 	stored_count = count;
+}
+
+void metricfs_stub_set_peek_first_error(int err)
+{
+	peek_first_error = err;
 }
 
 struct metricfs *metricfs_create(struct kvstore *kvstore,
@@ -94,6 +101,10 @@ int metricfs_peek_first(struct metricfs *fs,
 		void *buf, const size_t bufsize, metricfs_id_t *id)
 {
 	(void)fs;
+	if (peek_first_error != 0) {
+		return peek_first_error;
+	}
+
 	if (buf == NULL || stored_count == 0) {
 		return 0;
 	}

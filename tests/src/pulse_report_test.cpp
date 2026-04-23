@@ -21,6 +21,7 @@ static size_t transmitted_payload_len;
 static void *last_transmit_ctx;
 
 static uint64_t fake_timestamp;
+static unsigned int transport_cancel_calls;
 
 extern "C" uint64_t metrics_get_unix_timestamp(void)
 {
@@ -40,6 +41,11 @@ extern "C" int metrics_report_transmit(const void *data, size_t datasize,
 	return mock().actualCall("metrics_report_transmit")
 		.withParameter("datasize", datasize)
 		.returnIntValue();
+}
+
+extern "C" void pulse_transport_cancel(void)
+{
+	transport_cancel_calls++;
 }
 
 static void response_handler(const void *data, size_t datasize, void *ctx)
@@ -92,6 +98,7 @@ TEST_GROUP(PulseReport)
 		transmitted_payload_len = 0u;
 		last_transmit_ctx = NULL;
 		fake_timestamp = 0u;
+		transport_cancel_calls = 0u;
 		metricfs_stub_reset();
 		metrics_reset();
 		metrics_report_periodic_reset();
@@ -798,6 +805,20 @@ TEST(PulseReport, ShouldBypassTimingGateWhenBacklogExists)
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
+TEST(PulseReport, ShouldReturnIoWhenBacklogPeekFails)
+{
+	static const uint8_t backlog_payload[] = { 0xA1, 0x01, 0x01 };
+
+	init_pulse_with_mfs();
+	metricfs_stub_prime(backlog_payload, sizeof(backlog_payload), 1u);
+	metricfs_stub_set_peek_first_error(-EIO);
+
+	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+	CHECK_FALSE(pulse_get_report_ctx()->in_flight);
+	POINTERS_EQUAL(NULL, pulse_get_report_ctx()->flight_buf);
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+}
+
 TEST(PulseReport, ShouldClearInFlightOnReinit)
 {
 	init_pulse_async();
@@ -813,6 +834,21 @@ TEST(PulseReport, ShouldClearInFlightOnReinit)
 	init_pulse_async();
 	CHECK_FALSE(pulse_get_report_ctx()->in_flight);
 	POINTERS_EQUAL(NULL, pulse_get_report_ctx()->flight_buf);
+}
+
+TEST(PulseReport, ShouldCancelTransportWhenReinitWhileInFlight)
+{
+	init_pulse_async();
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EINPROGRESS);
+
+	metrics_set(PulseMetric, METRICS_VALUE(5));
+	pulse_report();
+
+	init_pulse_async();
+	CHECK_EQUAL(1u, transport_cancel_calls);
 }
 
 TEST(PulseReport, ShouldBeAbleToReportAfterReinitWhileInFlight)

@@ -7,6 +7,8 @@
 #ifndef PULSE_H
 #define PULSE_H
 
+#include <stdint.h>
+
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -79,6 +81,8 @@ struct pulse {
 			pulse_update_metricfs(). */
 	void *ctx; /**< Optional. User context pointer passed through to the
 			transmit callback. */
+	uint32_t transmit_timeout_ms; /**< Optional. Maximum transmit time in
+			milliseconds. Set to 0 to use the platform default. */
 	bool reset_metrics_on_init; /**< When true, resets all metric counters
 			during pulse_init(). Set to false (default) to preserve
 			accumulated metric values across re-initialisation. */

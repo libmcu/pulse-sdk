@@ -262,9 +262,14 @@ static pulse_status_t collect_from_store(void)
 		return PULSE_STATUS_BACKLOG_OVERFLOW;
 	}
 
-	if (n <= 0) {
+	if (n == 0) {
 		free_flight_buf();
 		return PULSE_STATUS_EMPTY;
+	}
+
+	if (n < 0) {
+		free_flight_buf();
+		return map_metrics_report_error(n);
 	}
 
 	m.flight_len = (size_t)n;
@@ -434,6 +439,7 @@ pulse_status_t pulse_init(struct pulse *pulse)
 	}
 
 	if (m.in_flight) {
+		pulse_transport_cancel();
 		clear_in_flight();
 	}
 
