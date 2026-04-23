@@ -153,15 +153,23 @@ static pulse_status_t map_metrics_report_error(int err)
 	}
 }
 
+static void set_last_report_time(uint64_t timestamp)
+{
+	m.last_report_time = timestamp;
+}
+
+static uint64_t get_last_report_time(void)
+{
+	return m.last_report_time;
+}
+
 static bool has_backlog(void)
 {
 	return m.conf.mfs != NULL && metricfs_count(m.conf.mfs) > 0u;
 }
 
-static bool interval_elapsed(void)
+static bool is_interval_reached(const uint64_t now)
 {
-	uint64_t now = metrics_get_unix_timestamp();
-
 	if (now == 0u) {
 		return true;
 	}
@@ -170,11 +178,31 @@ static bool interval_elapsed(void)
 		return true;
 	}
 
-	if (now < m.last_report_time) {
-		m.last_report_time = now;
+	if (now < get_last_report_time()) {
+		return false;
 	}
 
-	return (now - m.last_report_time) >= METRICS_REPORT_INTERVAL_SEC;
+	return (now - get_last_report_time()) >= METRICS_REPORT_INTERVAL_SEC;
+}
+
+static bool is_in_flight(void)
+{
+	return m.in_flight;
+}
+
+static void set_in_flight(bool in_flight)
+{
+	m.in_flight = in_flight;
+}
+
+static bool is_initialized(void)
+{
+	return m.initialized;
+}
+
+static bool is_token_valid(const char *token)
+{
+	return token != NULL && strlen(token) <= PULSE_TOKEN_LEN;
 }
 
 static void free_flight_buf(void)
@@ -191,7 +219,7 @@ static void free_flight_buf(void)
 static void clear_in_flight(void)
 {
 	free_flight_buf();
-	m.in_flight = false;
+	set_in_flight(false);
 }
 
 static pulse_status_t commit_flight(void)
@@ -202,12 +230,12 @@ static pulse_status_t commit_flight(void)
 		err = metricfs_del_first(m.conf.mfs, NULL);
 	} else {
 		metrics_reset();
-	}
 
-	uint64_t now = metrics_get_unix_timestamp();
-	if (now != 0u) {
-		m.last_report_time = now;
-		m.periodic_initialized = true;
+		uint64_t now = metrics_get_unix_timestamp();
+		if (now != 0u) {
+			set_last_report_time(now);
+			m.periodic_initialized = true;
+		}
 	}
 
 	clear_in_flight();
@@ -220,6 +248,8 @@ static pulse_status_t abort_flight(int transmit_err)
 	bool saved_to_backlog = false;
 
 	if (!m.flight_from_store && m.conf.mfs != NULL) {
+		metrics_report_prepare(m.user_ctx);
+		m.flight_len = metrics_collect(m.flight_buf, m.flight_bufsize);
 		if (metricfs_write(m.conf.mfs,
 				m.flight_buf, m.flight_len, NULL) == 0) {
 			metrics_reset();
@@ -236,7 +266,7 @@ static pulse_status_t abort_flight(int transmit_err)
 	return map_metrics_report_error(transmit_err);
 }
 
-static pulse_status_t phase_transmit(void)
+static pulse_status_t do_transmit(void)
 {
 	int err = metrics_report_transmit(m.flight_buf,
 			m.flight_len, m.user_ctx);
@@ -274,9 +304,9 @@ static pulse_status_t collect_from_store(void)
 
 	m.flight_len = (size_t)n;
 	m.flight_from_store = true;
-	m.in_flight = true;
+	set_in_flight(true);
 
-	return phase_transmit();
+	return do_transmit();
 }
 
 static pulse_status_t collect_from_metrics(void)
@@ -296,12 +326,12 @@ static pulse_status_t collect_from_metrics(void)
 	}
 
 	m.flight_from_store = false;
-	m.in_flight = true;
+	set_in_flight(true);
 
-	return phase_transmit();
+	return do_transmit();
 }
 
-static pulse_status_t phase_collect(void)
+static pulse_status_t do_collect(void)
 {
 	pulse_status_t status;
 	size_t payload_len;
@@ -337,7 +367,7 @@ const struct pulse_report_ctx *pulse_get_report_ctx(void)
 
 pulse_status_t pulse_update_token(const char *token)
 {
-	if (token == NULL || strlen(token) > PULSE_TOKEN_LEN) {
+	if (!is_token_valid(token)) {
 		return PULSE_STATUS_INVALID_ARGUMENT;
 	}
 
@@ -364,26 +394,35 @@ pulse_status_t pulse_set_response_handler(pulse_response_handler_t handler,
 
 pulse_status_t pulse_report(void)
 {
-	if (!m.initialized || m.conf.token == NULL) {
+	if (!is_initialized() || !is_token_valid(m.conf.token)) {
 		return PULSE_STATUS_INVALID_ARGUMENT;
 	}
 
-	if (m.in_flight) {
-		return phase_transmit();
+	if (is_in_flight()) {
+		return do_transmit();
 	}
 
-	if (!interval_elapsed() && !has_backlog()) {
-		return PULSE_STATUS_TOO_SOON;
+	if (!has_backlog()) {
+		const uint64_t now = metrics_get_unix_timestamp();
+
+		if (now != 0u && now < get_last_report_time()) {
+			set_last_report_time(now);
+			return PULSE_STATUS_TOO_SOON;
+		}
+
+		if (!is_interval_reached(now)) {
+			return PULSE_STATUS_TOO_SOON;
+		}
 	}
 
-	return phase_collect();
+	return do_collect();
 }
 
 LIBMCU_WEAK void pulse_transport_cancel(void) {}
 
 pulse_status_t pulse_cancel(void)
 {
-	if (!m.in_flight) {
+	if (!is_in_flight()) {
 		return PULSE_STATUS_INVALID_ARGUMENT;
 	}
 
@@ -438,7 +477,7 @@ pulse_status_t pulse_init(struct pulse *pulse)
 		return PULSE_STATUS_INVALID_ARGUMENT;
 	}
 
-	if (m.in_flight) {
+	if (is_in_flight()) {
 		pulse_transport_cancel();
 		clear_in_flight();
 	}
@@ -447,9 +486,9 @@ pulse_status_t pulse_init(struct pulse *pulse)
 	m.user_ctx = pulse->ctx;
 	m.on_response = NULL;
 	m.response_ctx = NULL;
-	m.last_report_time = 0u;
 	m.periodic_initialized = false;
 	force_reset = pulse->reset_metrics_on_init;
+	set_last_report_time(0u);
 
 	metrics_init(force_reset);
 	m.initialized = true;

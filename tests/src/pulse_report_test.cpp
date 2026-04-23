@@ -14,6 +14,8 @@ extern "C" {
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
 #include "metricfs_stub.h"
+
+void pulse_transport_cancel(void);
 }
 
 static uint8_t transmitted_payload[1024];
@@ -444,6 +446,37 @@ TEST(PulseReport, ShouldSaveToBacklogWhenAsyncTransmitFailsWithMfs)
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 }
 
+TEST(PulseReport, ShouldPreserveMetricsRecordedDuringFlightAbort)
+{
+	init_pulse_async_with_mfs();
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EINPROGRESS);
+
+	metrics_set(PulseMetric, METRICS_VALUE(5));
+	pulse_report();
+
+	metrics_set(PulseMetric, METRICS_VALUE(10));
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EIO);
+	pulse_report();
+
+	uint8_t expected_payload[128];
+	metrics_set(PulseMetric, METRICS_VALUE(10));
+	size_t expected_len = metrics_collect(expected_payload, sizeof(expected_payload));
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", expected_len)
+		.andReturnValue(0);
+	pulse_report();
+
+	LONGS_EQUAL(expected_len, transmitted_payload_len);
+	MEMCMP_EQUAL(expected_payload, transmitted_payload, expected_len);
+}
+
 TEST(PulseReport, ShouldNotSaveToBacklogWhenAsyncTransmitFailsWithoutMfs)
 {
 	init_pulse_async();
@@ -611,6 +644,31 @@ TEST(PulseReport, ShouldHandleTimestampRollbackGracefully)
 	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
 }
 
+TEST(PulseReport, ShouldReportWhenIntervalElapsedAfterRollback)
+{
+	fake_timestamp = 5000u;
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 100u; // Rollback
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
+
+	fake_timestamp = 100u + 3600u; // Interval elapsed after rollback
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+}
+
+
+
 TEST(PulseReport, ShouldReturnBacklogPendingWhileBacklogRemains)
 {
 	init_pulse_with_mfs();
@@ -711,6 +769,30 @@ TEST(PulseReport, ShouldDeleteBacklogEntryAfterSuccessfulTransmit)
 
 	pulse_report();
 	CHECK_EQUAL(0u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+}
+
+TEST(PulseReport, ShouldNotAdvanceIntervalOnBacklogReplay)
+{
+	init_pulse_with_mfs();
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EIO);
+
+	metrics_set(PulseMetric, METRICS_VALUE(9));
+	pulse_report();
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+
+	fake_timestamp = 1000u;
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+
+	pulse_report();
+	CHECK_EQUAL(0u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+
+	CHECK_EQUAL(0u, pulse_get_report_ctx()->last_report_time);
+	CHECK_FALSE(pulse_get_report_ctx()->periodic_initialized);
 }
 
 TEST(PulseReport, ShouldReturnInProgressWhenAsyncBacklogTransmitInProgress)
@@ -1004,4 +1086,37 @@ TEST(PulseReport, ShouldReturnInvalidArgumentWhenCancelCalledAfterSuccessfulRepo
 	pulse_report();
 
 	CHECK_EQUAL(PULSE_STATUS_INVALID_ARGUMENT, pulse_cancel());
+}
+
+TEST(PulseReport, ShouldUpdateLastReportTimeOnRollbackWhenNoBacklog)
+{
+	fake_timestamp = 5000u;
+	mock().expectOneCall("metrics_report_transmit").withParameter("datasize", (size_t)8).andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	pulse_report(); 
+
+	fake_timestamp = 100u; 
+	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
+	LONGS_EQUAL(100u, pulse_get_report_ctx()->last_report_time);
+}
+
+TEST(PulseReport, ShouldNotUpdateLastReportTimeOnRollbackDuringBacklogReplay)
+{
+	init_pulse_with_mfs();
+	fake_timestamp = 5000u;
+
+	mock().expectOneCall("metrics_report_transmit").withParameter("datasize", (size_t)8).andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	pulse_report(); 
+
+	fake_timestamp = 10000u;
+	mock().expectOneCall("metrics_report_transmit").withParameter("datasize", (size_t)8).andReturnValue(-EIO);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	pulse_report();
+
+	fake_timestamp = 100u; 
+	mock().expectOneCall("metrics_report_transmit").withParameter("datasize", (size_t)8).andReturnValue(0);
+	pulse_report(); 
+
+	LONGS_EQUAL(5000u, pulse_get_report_ctx()->last_report_time);
 }
