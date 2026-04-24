@@ -21,11 +21,6 @@ extern "C" {
 #define PULSE_INGEST_URL_HTTPS	"https://" PULSE_INGEST_HOST PULSE_INGEST_PATH
 #define PULSE_INGEST_URL_COAPS	"coaps://" PULSE_INGEST_HOST PULSE_INGEST_PATH
 
-/* 256-bit token encoded in URL-safe Base64, excluding null terminator. */
-#define PULSE_TOKEN_LEN			43U
-/* Buffer size required to hold the authentication token including null terminator. */
-#define PULSE_TOKEN_BUFSIZE		(PULSE_TOKEN_LEN + 1U)
-
 struct pulse_report_ctx {
 	void *user_ctx;
 	struct pulse conf;
