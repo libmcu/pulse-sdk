@@ -11,9 +11,9 @@ Pulse SDK는 [libmcu/metrics](https://github.com/libmcu/libmcu/metrics)를
 ```c
 #include "pulse/pulse.h"
 
-void metrics_report_prepare(void *ctx)
+static void update_metrics(void *ctx)
 {
-	metrics_increase(RunCount);
+	metrics_set(SensorValue, get_your_sensor_value());
 }
 
 void example(void)
@@ -24,6 +24,9 @@ void example(void)
 		return;
 	}
 
+	pulse_set_prepare_handler(update_metrics, NULL);
+
+	metrics_increase(RunCount);
 	pulse_report();
 }
 ```
@@ -35,7 +38,8 @@ void example(void)
 metrics.def 파일 예시:
 
 ```c
-METRICS_DEFINE(RunCount)
+METRICS_DEFINE_COUNTER(RunCount)
+METRICS_DEFINE(SensorValue)
 ```
 
 ## 플랫폼별 통합 방법
@@ -155,7 +159,7 @@ Make 통합 시 `pulse-sdk.mk`는 아래 순서로 의존성을 해석합니다.
 - `metrics_get_serial_number_string()`
 - `metrics_get_version_string()`
 
-실제 전송은 `metrics_report_transmit(const void *data, size_t datasize, void *ctx)`를 통해 수행됩니다.
+실제 전송은 `pulse_transport_transmit(const void *data, size_t datasize, const struct pulse_report_ctx *ctx)`를 통해 수행됩니다.
 
 Pulse SDK에 포함된 플랫폼 port는 timestamp 및 lock hook를 제공할 수 있지만, 전송 경로까지 항상 완성해 주지는 않습니다. Linux를 포함한 일반 port에서는 기본 구현이 weak stub이며, 애플리케이션이 override하지 않으면 I/O 오류를 반환합니다.
 

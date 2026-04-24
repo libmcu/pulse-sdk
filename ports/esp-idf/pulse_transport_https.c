@@ -253,31 +253,17 @@ static int advance_session(https_session_t *s,
 	return finalize_session(s, rctx);
 }
 
-int metrics_report_transmit(const void *data, size_t datasize, void *ctx);
-
-#ifdef UNIT_TEST
-void metrics_report_reset(void);
-
-void metrics_report_reset(void)
-{
-	reset_session(&m_session);
-}
-#endif
-
 void pulse_transport_cancel(void)
 {
-	if (m_session.state == STATE_IDLE) {
-		return;
+	if (m_session.state != STATE_IDLE) {
+		esp_http_client_cleanup(m_session.client);
 	}
-
-	esp_http_client_cleanup(m_session.client);
 	reset_session(&m_session);
 }
 
-int metrics_report_transmit(const void *data, size_t datasize, void *ctx)
+int pulse_transport_transmit(const void *data, size_t datasize,
+		const struct pulse_report_ctx *ctx)
 {
-	(void)ctx;
-
 	if (data == NULL || datasize == 0u) {
 		return -EINVAL;
 	}
@@ -286,15 +272,14 @@ int metrics_report_transmit(const void *data, size_t datasize, void *ctx)
 		return -EOVERFLOW;
 	}
 
-	const struct pulse_report_ctx *rctx = pulse_get_report_ctx();
-	const bool async = rctx && rctx->conf.async_transport;
+	const bool async = ctx && ctx->conf.async_transport;
 
 	if (m_session.state == STATE_IDLE) {
-		int ret = start_session(&m_session, data, datasize, rctx, async);
+		int ret = start_session(&m_session, data, datasize, ctx, async);
 		if (ret != 0) {
 			return ret;
 		}
 	}
 
-	return advance_session(&m_session, rctx, async);
+	return advance_session(&m_session, ctx, async);
 }

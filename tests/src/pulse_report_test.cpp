@@ -9,29 +9,32 @@ extern "C" {
 #include <string.h>
 
 #include <libmcu/metrics.h>
-#include <libmcu/metrics_reporter.h>
 
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
 #include "metricfs_stub.h"
-
-void pulse_transport_cancel(void);
 }
 
 static uint8_t transmitted_payload[1024];
 static size_t transmitted_payload_len;
-static void *last_transmit_ctx;
+static const struct pulse_report_ctx *last_transmit_ctx;
 
 static uint64_t fake_timestamp;
 static unsigned int transport_cancel_calls;
+static unsigned int prepare_handler_calls;
+static unsigned int prepare_order;
+static unsigned int prepare_handler_order;
+static void *last_prepare_handler_ctx;
+
+extern "C" void pulse_transport_cancel(void);
 
 extern "C" uint64_t metrics_get_unix_timestamp(void)
 {
 	return fake_timestamp;
 }
 
-extern "C" int metrics_report_transmit(const void *data, size_t datasize,
-		void *ctx)
+extern "C" int pulse_transport_transmit(const void *data, size_t datasize,
+		const struct pulse_report_ctx *ctx)
 {
 	last_transmit_ctx = ctx;
 
@@ -40,7 +43,7 @@ extern "C" int metrics_report_transmit(const void *data, size_t datasize,
 		transmitted_payload_len = datasize;
 	}
 
-	return mock().actualCall("metrics_report_transmit")
+	return mock().actualCall("pulse_transport_transmit")
 		.withParameter("datasize", datasize)
 		.returnIntValue();
 }
@@ -55,6 +58,13 @@ static void response_handler(const void *data, size_t datasize, void *ctx)
 	(void)data;
 	(void)datasize;
 	(void)ctx;
+}
+
+static void prepare_handler(void *ctx)
+{
+	prepare_handler_calls++;
+	last_prepare_handler_ctx = ctx;
+	prepare_handler_order = ++prepare_order;
 }
 
 static void init_pulse_default(void)
@@ -101,9 +111,12 @@ TEST_GROUP(PulseReport)
 		last_transmit_ctx = NULL;
 		fake_timestamp = 0u;
 		transport_cancel_calls = 0u;
+		prepare_handler_calls = 0u;
+		prepare_order = 0u;
+		prepare_handler_order = 0u;
+		last_prepare_handler_ctx = NULL;
 		metricfs_stub_reset();
 		metrics_reset();
-		metrics_report_periodic_reset();
 
 		init_pulse_default();
 	}
@@ -118,7 +131,7 @@ TEST_GROUP(PulseReport)
 
 TEST(PulseReport, ShouldTransmitCollectedMetricsWhenReportCalled)
 {
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -130,7 +143,7 @@ TEST(PulseReport, ShouldTransmitCollectedMetricsWhenReportCalled)
 
 TEST(PulseReport, ShouldReturnIoWhenTransmitFails)
 {
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 
@@ -141,7 +154,7 @@ TEST(PulseReport, ShouldReturnIoWhenTransmitFails)
 
 TEST(PulseReport, ShouldReturnTimeoutWhenTransmitTimesOut)
 {
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-ETIMEDOUT);
 
@@ -152,7 +165,7 @@ TEST(PulseReport, ShouldReturnTimeoutWhenTransmitTimesOut)
 
 TEST(PulseReport, ShouldReturnNotSupportedWhenTransportIsUnavailable)
 {
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-ENOSYS);
 
@@ -161,9 +174,13 @@ TEST(PulseReport, ShouldReturnNotSupportedWhenTransportIsUnavailable)
 	CHECK_EQUAL(PULSE_STATUS_NOT_SUPPORTED, pulse_report());
 }
 
-TEST(PulseReport, ShouldReturnEmptyWhenNoMetricsCollected)
+TEST(PulseReport, ShouldTransmitHeartbeatWhenNoMetricsSet)
 {
-	CHECK_EQUAL(PULSE_STATUS_EMPTY, pulse_report());
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
 TEST(PulseReport, ShouldReturnInvalidArgumentWhenInitCalledWithNull)
@@ -207,7 +224,7 @@ TEST(PulseReport, ShouldAllowLateTokenSet)
 	CHECK_EQUAL(PULSE_STATUS_OK,
 			pulse_update_metricfs((struct metricfs *)(uintptr_t)1));
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -221,28 +238,108 @@ TEST(PulseReport, ShouldClearResponseHandlerWhenReinitialized)
 
 	CHECK_EQUAL(PULSE_STATUS_OK,
 			pulse_set_response_handler(response_handler, &conf));
-	CHECK_TRUE(pulse_get_report_ctx()->on_response != NULL);
-	POINTERS_EQUAL(&conf, pulse_get_report_ctx()->response_ctx);
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	pulse_report();
+	CHECK_TRUE(last_transmit_ctx != NULL && last_transmit_ctx->on_response != NULL);
+	POINTERS_EQUAL(&conf, last_transmit_ctx->response_ctx);
 
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_init(&conf));
-	CHECK_TRUE(pulse_get_report_ctx()->on_response == NULL);
-	POINTERS_EQUAL(NULL, pulse_get_report_ctx()->response_ctx);
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	pulse_report();
+	CHECK_TRUE(last_transmit_ctx->on_response == NULL);
+	POINTERS_EQUAL(NULL, last_transmit_ctx->response_ctx);
 }
 
-TEST(PulseReport, ShouldPassUserCtxDirectlyToTransmitCallback)
+TEST(PulseReport, ShouldCallPrepareHandlerBeforeMetricsCollection)
+{
+	int prepare_ctx = 2;
+	struct pulse conf = { .token = "test-token" };
+
+	pulse_init(&conf);
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_set_prepare_handler(prepare_handler, &prepare_ctx));
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(11));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	CHECK_EQUAL(1u, prepare_handler_calls);
+	POINTERS_EQUAL(&prepare_ctx, last_prepare_handler_ctx);
+	CHECK_EQUAL(1u, prepare_handler_order);
+}
+
+TEST(PulseReport, ShouldClearPrepareHandlerWhenReinitialized)
+{
+	struct pulse conf = { .token = "test-token" };
+
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_set_prepare_handler(prepare_handler, &conf));
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	pulse_report();
+	CHECK_TRUE(last_transmit_ctx != NULL && last_transmit_ctx->on_prepare != NULL);
+	POINTERS_EQUAL(&conf, last_transmit_ctx->prepare_ctx);
+
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_init(&conf));
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	pulse_report();
+	CHECK_TRUE(last_transmit_ctx->on_prepare == NULL);
+	POINTERS_EQUAL(NULL, last_transmit_ctx->prepare_ctx);
+}
+
+TEST(PulseReport, ShouldNotCallPrepareHandlerAfterUnregister)
+{
+	int prepare_ctx = 2;
+	struct pulse conf = { .token = "test-token" };
+
+	pulse_init(&conf);
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_set_prepare_handler(prepare_handler, &prepare_ctx));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_set_prepare_handler(NULL, NULL));
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(12));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	CHECK_EQUAL(0u, prepare_handler_calls);
+}
+
+TEST(PulseReport, ShouldPassReportCtxToTransmitCallback)
 {
 	int user_data = 42;
 	struct pulse conf = { .token = "test-token", .ctx = &user_data };
 	pulse_init(&conf);
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
 	metrics_set(PulseMetric, METRICS_VALUE(1));
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 
-	POINTERS_EQUAL(&user_data, last_transmit_ctx);
+	CHECK_TRUE(last_transmit_ctx != NULL);
+	POINTERS_EQUAL(&user_data, last_transmit_ctx->user_ctx);
 }
 
 TEST(PulseReport, ShouldReturnNonNullForAllStatusStringConversions)
@@ -267,7 +364,7 @@ TEST(PulseReport, ShouldReturnInProgressWhenAsyncTransportReturnedEinprogress)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -279,23 +376,24 @@ TEST(PulseReport, ShouldSetInFlightFlagWhenAsyncTransmitReturnsEinprogress)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
 	metrics_set(PulseMetric, METRICS_VALUE(5));
-	pulse_report();
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
 
-	CHECK_TRUE(pulse_get_report_ctx()->in_flight);
-	CHECK_TRUE(pulse_get_report_ctx()->flight_buf != NULL);
-	CHECK_TRUE(pulse_get_report_ctx()->flight_len > 0u);
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EINPROGRESS);
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
 }
 
 TEST(PulseReport, ShouldNotCallTransmitTwiceOnFirstCallWhenInProgress)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -307,7 +405,7 @@ TEST(PulseReport, ShouldUseOriginalPayloadOnReentryWhenInProgress)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -318,7 +416,7 @@ TEST(PulseReport, ShouldUseOriginalPayloadOnReentryWhenInProgress)
 	size_t first_len = transmitted_payload_len;
 	memcpy(first_payload, transmitted_payload, first_len);
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -333,14 +431,14 @@ TEST(PulseReport, ShouldCallTransmitAgainOnReentryWhenInProgress)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
 	metrics_set(PulseMetric, METRICS_VALUE(5));
 	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -351,14 +449,14 @@ TEST(PulseReport, ShouldReturnOkWhenAsyncTransmitEventuallySucceeds)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
 	metrics_set(PulseMetric, METRICS_VALUE(5));
 	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -369,20 +467,22 @@ TEST(PulseReport, ShouldClearInFlightAfterSuccessfulAsyncCompletion)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
 	metrics_set(PulseMetric, METRICS_VALUE(5));
 	pulse_report();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
-	pulse_report();
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 
-	CHECK_FALSE(pulse_get_report_ctx()->in_flight);
-	POINTERS_EQUAL(NULL, pulse_get_report_ctx()->flight_buf);
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
 TEST(PulseReport, ShouldUpdateLastReportTimeAfterAsyncCompletion)
@@ -390,7 +490,7 @@ TEST(PulseReport, ShouldUpdateLastReportTimeAfterAsyncCompletion)
 	fake_timestamp = 1000u;
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -398,47 +498,59 @@ TEST(PulseReport, ShouldUpdateLastReportTimeAfterAsyncCompletion)
 	pulse_report();
 
 	fake_timestamp = 1500u;
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
-	pulse_report();
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 
-	LONGS_EQUAL(1500u, pulse_get_report_ctx()->last_report_time);
-	CHECK_TRUE(pulse_get_report_ctx()->periodic_initialized);
+	fake_timestamp = 1500u + 3600u - 1u;
+	metrics_set(PulseMetric, METRICS_VALUE(6));
+	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
+
+	fake_timestamp = 1500u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(6));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
 TEST(PulseReport, ShouldReturnIoAndClearInFlightWhenAsyncTransmitFails)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
 	metrics_set(PulseMetric, METRICS_VALUE(5));
 	pulse_report();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 
 	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
-	CHECK_FALSE(pulse_get_report_ctx()->in_flight);
-	POINTERS_EQUAL(NULL, pulse_get_report_ctx()->flight_buf);
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(6));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
 TEST(PulseReport, ShouldSaveToBacklogWhenAsyncTransmitFailsWithMfs)
 {
 	init_pulse_async_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
 	metrics_set(PulseMetric, METRICS_VALUE(5));
 	pulse_report();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 	pulse_report();
@@ -450,7 +562,7 @@ TEST(PulseReport, ShouldPreserveMetricsRecordedDuringFlightAbort)
 {
 	init_pulse_async_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -459,7 +571,7 @@ TEST(PulseReport, ShouldPreserveMetricsRecordedDuringFlightAbort)
 
 	metrics_set(PulseMetric, METRICS_VALUE(10));
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 	pulse_report();
@@ -468,7 +580,7 @@ TEST(PulseReport, ShouldPreserveMetricsRecordedDuringFlightAbort)
 	metrics_set(PulseMetric, METRICS_VALUE(10));
 	size_t expected_len = metrics_collect(expected_payload, sizeof(expected_payload));
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", expected_len)
 		.andReturnValue(0);
 	pulse_report();
@@ -481,14 +593,14 @@ TEST(PulseReport, ShouldNotSaveToBacklogWhenAsyncTransmitFailsWithoutMfs)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
 	metrics_set(PulseMetric, METRICS_VALUE(5));
 	pulse_report();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 	pulse_report();
@@ -500,26 +612,31 @@ TEST(PulseReport, ShouldReturnTimeoutAndClearInFlightWhenAsyncTransmitTimesOut)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
 	metrics_set(PulseMetric, METRICS_VALUE(5));
 	pulse_report();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-ETIMEDOUT);
 
 	CHECK_EQUAL(PULSE_STATUS_TIMEOUT, pulse_report());
-	CHECK_FALSE(pulse_get_report_ctx()->in_flight);
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(6));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
 TEST(PulseReport, ShouldNotWriteBacklogWhenAsyncTransportReturnedEinprogress)
 {
 	init_pulse_async_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -530,7 +647,7 @@ TEST(PulseReport, ShouldNotWriteBacklogWhenAsyncTransportReturnedEinprogress)
 
 TEST(PulseReport, ShouldReportEveryCallWhenTimestampIsZero)
 {
-	mock().expectNCalls(2, "metrics_report_transmit")
+	mock().expectNCalls(2, "pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -545,20 +662,23 @@ TEST(PulseReport, ShouldReportOnFirstCallWhenIntervalNotYetInitialized)
 {
 	fake_timestamp = 1000u;
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
 	metrics_set(PulseMetric, METRICS_VALUE(1));
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
-	CHECK_TRUE(pulse_get_report_ctx()->periodic_initialized);
+
+	fake_timestamp = 1001u;
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
 }
 
 TEST(PulseReport, ShouldReturnTooSoonWhenIntervalNotElapsed)
 {
 	fake_timestamp = 1000u;
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -574,7 +694,7 @@ TEST(PulseReport, ShouldReportWhenIntervalHasElapsed)
 {
 	fake_timestamp = 1000u;
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -583,7 +703,7 @@ TEST(PulseReport, ShouldReportWhenIntervalHasElapsed)
 
 	fake_timestamp = 1000u + 3600u;
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -596,7 +716,7 @@ TEST(PulseReport, ShouldBypassTimingGateWhenInFlight)
 	fake_timestamp = 1000u;
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -604,7 +724,7 @@ TEST(PulseReport, ShouldBypassTimingGateWhenInFlight)
 	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
 
 	fake_timestamp = 1001u;
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -615,23 +735,31 @@ TEST(PulseReport, ShouldResetPeriodicInitializedOnReinit)
 {
 	fake_timestamp = 1000u;
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
 	metrics_set(PulseMetric, METRICS_VALUE(1));
 	pulse_report();
-	CHECK_TRUE(pulse_get_report_ctx()->periodic_initialized);
+
+	fake_timestamp = 1001u;
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
 
 	init_pulse_default();
-	CHECK_FALSE(pulse_get_report_ctx()->periodic_initialized);
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
 TEST(PulseReport, ShouldHandleTimestampRollbackGracefully)
 {
 	fake_timestamp = 5000u;
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -648,7 +776,7 @@ TEST(PulseReport, ShouldReportWhenIntervalElapsedAfterRollback)
 {
 	fake_timestamp = 5000u;
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -660,7 +788,7 @@ TEST(PulseReport, ShouldReportWhenIntervalElapsedAfterRollback)
 	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
 
 	fake_timestamp = 100u + 3600u; // Interval elapsed after rollback
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -671,14 +799,14 @@ TEST(PulseReport, ShouldReturnBacklogPendingWhileBacklogRemains)
 {
 	init_pulse_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 
 	metrics_set(PulseMetric, METRICS_VALUE(9));
 	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_report());
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -689,7 +817,7 @@ TEST(PulseReport, ShouldSavePayloadToBacklogWhenTransmitFails)
 {
 	init_pulse_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 
@@ -703,7 +831,7 @@ TEST(PulseReport, ShouldNotSavePayloadToBacklogWhenMfsIsNull)
 {
 	init_pulse_default();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 
@@ -715,7 +843,7 @@ TEST(PulseReport, ShouldTransmitBacklogPayloadOnNextCall)
 {
 	init_pulse_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 
@@ -726,7 +854,7 @@ TEST(PulseReport, ShouldTransmitBacklogPayloadOnNextCall)
 	size_t saved_len = transmitted_payload_len;
 	memcpy(saved_payload, transmitted_payload, saved_len);
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -753,7 +881,7 @@ TEST(PulseReport, ShouldDeleteBacklogEntryAfterSuccessfulTransmit)
 {
 	init_pulse_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 
@@ -761,7 +889,7 @@ TEST(PulseReport, ShouldDeleteBacklogEntryAfterSuccessfulTransmit)
 	pulse_report();
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -773,7 +901,7 @@ TEST(PulseReport, ShouldNotAdvanceIntervalOnBacklogReplay)
 {
 	init_pulse_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 
@@ -782,42 +910,49 @@ TEST(PulseReport, ShouldNotAdvanceIntervalOnBacklogReplay)
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 
 	fake_timestamp = 1000u;
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
 	pulse_report();
 	CHECK_EQUAL(0u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 
-	CHECK_EQUAL(0u, pulse_get_report_ctx()->last_report_time);
-	CHECK_FALSE(pulse_get_report_ctx()->periodic_initialized);
+	fake_timestamp = 1001u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(10));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
 TEST(PulseReport, ShouldReturnInProgressWhenAsyncBacklogTransmitInProgress)
 {
 	init_pulse_async_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 
 	metrics_set(PulseMetric, METRICS_VALUE(5));
 	pulse_report();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
 	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
-	CHECK_TRUE(pulse_get_report_ctx()->in_flight);
-	CHECK_TRUE(pulse_get_report_ctx()->flight_from_store);
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EINPROGRESS);
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
 }
 
 TEST(PulseReport, ShouldDeleteBacklogEntryAfterSuccessfulAsyncBacklogTransmit)
 {
 	init_pulse_async_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 
@@ -825,25 +960,29 @@ TEST(PulseReport, ShouldDeleteBacklogEntryAfterSuccessfulAsyncBacklogTransmit)
 	pulse_report();
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 	pulse_report();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 
 	CHECK_EQUAL(0u, metricfs_count((const struct metricfs *)(uintptr_t)1));
-	CHECK_FALSE(pulse_get_report_ctx()->in_flight);
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
 TEST(PulseReport, ShouldNotRewriteBacklogWhenAsyncBacklogTransmitFails)
 {
 	init_pulse_async_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 
@@ -851,12 +990,12 @@ TEST(PulseReport, ShouldNotRewriteBacklogWhenAsyncBacklogTransmitFails)
 	pulse_report();
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 	pulse_report();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 	pulse_report();
@@ -869,7 +1008,7 @@ TEST(PulseReport, ShouldBypassTimingGateWhenBacklogExists)
 	fake_timestamp = 1000u;
 	init_pulse_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 
@@ -878,7 +1017,7 @@ TEST(PulseReport, ShouldBypassTimingGateWhenBacklogExists)
 
 	fake_timestamp = 1001u;
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -894,33 +1033,30 @@ TEST(PulseReport, ShouldReturnIoWhenBacklogPeekFails)
 	metricfs_stub_set_peek_first_error(-EIO);
 
 	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
-	CHECK_FALSE(pulse_get_report_ctx()->in_flight);
-	POINTERS_EQUAL(NULL, pulse_get_report_ctx()->flight_buf);
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
 }
 
 TEST(PulseReport, ShouldClearInFlightOnReinit)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
 	metrics_set(PulseMetric, METRICS_VALUE(5));
-	pulse_report();
-	CHECK_TRUE(pulse_get_report_ctx()->in_flight);
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
 
 	init_pulse_async();
-	CHECK_FALSE(pulse_get_report_ctx()->in_flight);
-	POINTERS_EQUAL(NULL, pulse_get_report_ctx()->flight_buf);
+	CHECK_EQUAL(PULSE_STATUS_INVALID_ARGUMENT, pulse_cancel());
 }
 
 TEST(PulseReport, ShouldCancelTransportWhenReinitWhileInFlight)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -935,7 +1071,7 @@ TEST(PulseReport, ShouldBeAbleToReportAfterReinitWhileInFlight)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -944,7 +1080,7 @@ TEST(PulseReport, ShouldBeAbleToReportAfterReinitWhileInFlight)
 
 	init_pulse_default();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -954,7 +1090,7 @@ TEST(PulseReport, ShouldBeAbleToReportAfterReinitWhileInFlight)
 
 TEST(PulseReport, ShouldAllowMultipleReportsWhenTimestampIsZero)
 {
-	mock().expectNCalls(3, "metrics_report_transmit")
+	mock().expectNCalls(3, "pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -972,7 +1108,7 @@ TEST(PulseReport, ShouldCallTransportCancelWhenPulseCancelCalled)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -992,7 +1128,7 @@ TEST(PulseReport, ShouldReturnOkWhenCancelCalledWhileInFlight)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -1006,7 +1142,7 @@ TEST(PulseReport, ShouldClearInFlightAfterCancel)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -1014,15 +1150,14 @@ TEST(PulseReport, ShouldClearInFlightAfterCancel)
 	pulse_report();
 	pulse_cancel();
 
-	CHECK_FALSE(pulse_get_report_ctx()->in_flight);
-	POINTERS_EQUAL(NULL, pulse_get_report_ctx()->flight_buf);
+	CHECK_EQUAL(PULSE_STATUS_INVALID_ARGUMENT, pulse_cancel());
 }
 
 TEST(PulseReport, ShouldSaveToBacklogOnCancelWhenMfsAvailableAndNotFromStore)
 {
 	init_pulse_async_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -1033,11 +1168,45 @@ TEST(PulseReport, ShouldSaveToBacklogOnCancelWhenMfsAvailableAndNotFromStore)
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 }
 
+TEST(PulseReport, ShouldCallPrepareHandlerBeforeMetricsReportPrepareWhenCancelSavesBacklog)
+{
+	int report_ctx = 1;
+	int prepare_ctx = 2;
+	struct pulse conf = {
+		.token = "test-token",
+		.mfs = (struct metricfs *)(uintptr_t)1,
+		.ctx = &report_ctx,
+		.async_transport = true,
+	};
+
+	pulse_init(&conf);
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_set_prepare_handler(prepare_handler, &prepare_ctx));
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EINPROGRESS);
+
+	metrics_set(PulseMetric, METRICS_VALUE(5));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	prepare_handler_calls = 0u;
+	prepare_order = 0u;
+	prepare_handler_order = 0u;
+	last_prepare_handler_ctx = NULL;
+
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_cancel());
+
+	CHECK_EQUAL(1u, prepare_handler_calls);
+	POINTERS_EQUAL(&prepare_ctx, last_prepare_handler_ctx);
+	CHECK_EQUAL(1u, prepare_handler_order);
+}
+
 TEST(PulseReport, ShouldNotSaveToBacklogOnCancelWhenMfsNotAvailable)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -1052,7 +1221,7 @@ TEST(PulseReport, ShouldNotSaveToBacklogOnCancelWhenFlightFromStore)
 {
 	init_pulse_async_with_mfs();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EIO);
 
@@ -1060,7 +1229,7 @@ TEST(PulseReport, ShouldNotSaveToBacklogOnCancelWhenFlightFromStore)
 	pulse_report();
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 	pulse_report();
@@ -1073,7 +1242,7 @@ TEST(PulseReport, ShouldAllowNewReportAfterCancel)
 {
 	init_pulse_async();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(-EINPROGRESS);
 
@@ -1081,7 +1250,7 @@ TEST(PulseReport, ShouldAllowNewReportAfterCancel)
 	pulse_report();
 	pulse_cancel();
 
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -1091,7 +1260,7 @@ TEST(PulseReport, ShouldAllowNewReportAfterCancel)
 
 TEST(PulseReport, ShouldReturnInvalidArgumentWhenCancelCalledAfterSuccessfulReport)
 {
-	mock().expectOneCall("metrics_report_transmit")
+	mock().expectOneCall("pulse_transport_transmit")
 		.withParameter("datasize", (size_t)8)
 		.andReturnValue(0);
 
@@ -1104,13 +1273,23 @@ TEST(PulseReport, ShouldReturnInvalidArgumentWhenCancelCalledAfterSuccessfulRepo
 TEST(PulseReport, ShouldUpdateLastReportTimeOnRollbackWhenNoBacklog)
 {
 	fake_timestamp = 5000u;
-	mock().expectOneCall("metrics_report_transmit").withParameter("datasize", (size_t)8).andReturnValue(0);
+	mock().expectOneCall("pulse_transport_transmit").withParameter("datasize", (size_t)8).andReturnValue(0);
 	metrics_set(PulseMetric, METRICS_VALUE(1));
 	pulse_report(); 
 
-	fake_timestamp = 100u; 
+	fake_timestamp = 100u;
 	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
-	LONGS_EQUAL(100u, pulse_get_report_ctx()->last_report_time);
+
+	fake_timestamp = 100u + 3600u - 1u;
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
+
+	fake_timestamp = 100u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
 TEST(PulseReport, ShouldNotUpdateLastReportTimeOnRollbackDuringBacklogReplay)
@@ -1118,18 +1297,20 @@ TEST(PulseReport, ShouldNotUpdateLastReportTimeOnRollbackDuringBacklogReplay)
 	init_pulse_with_mfs();
 	fake_timestamp = 5000u;
 
-	mock().expectOneCall("metrics_report_transmit").withParameter("datasize", (size_t)8).andReturnValue(0);
+	mock().expectOneCall("pulse_transport_transmit").withParameter("datasize", (size_t)8).andReturnValue(0);
 	metrics_set(PulseMetric, METRICS_VALUE(1));
 	pulse_report(); 
 
 	fake_timestamp = 10000u;
-	mock().expectOneCall("metrics_report_transmit").withParameter("datasize", (size_t)8).andReturnValue(-EIO);
+	mock().expectOneCall("pulse_transport_transmit").withParameter("datasize", (size_t)8).andReturnValue(-EIO);
 	metrics_set(PulseMetric, METRICS_VALUE(2));
 	pulse_report();
 
-	fake_timestamp = 100u; 
-	mock().expectOneCall("metrics_report_transmit").withParameter("datasize", (size_t)8).andReturnValue(0);
-	pulse_report(); 
+	fake_timestamp = 100u;
+	mock().expectOneCall("pulse_transport_transmit").withParameter("datasize", (size_t)8).andReturnValue(0);
+	pulse_report();
 
-	LONGS_EQUAL(5000u, pulse_get_report_ctx()->last_report_time);
+	fake_timestamp = 100u + 3600u;
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
 }

@@ -7,26 +7,15 @@
 #ifndef PULSE_H
 #define PULSE_H
 
-#include <stdint.h>
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
 
+#include <stdint.h>
+
 #include "libmcu/metrics.h"
 #include "libmcu/metricfs.h"
-#include "libmcu/metrics_reporter.h"
 #include "libmcu/metrics_overrides.h"
-
-#define PULSE_INGEST_HOST	"ingest.libmcu.org"
-#define PULSE_INGEST_PATH	"/v1"
-#define PULSE_INGEST_URL_HTTPS	"https://" PULSE_INGEST_HOST PULSE_INGEST_PATH
-#define PULSE_INGEST_URL_COAPS	"coaps://" PULSE_INGEST_HOST PULSE_INGEST_PATH
-
-/* 256-bit token encoded in URL-safe Base64, excluding null terminator. */
-#define PULSE_TOKEN_LEN			43U
-/* Buffer size required to hold the authentication token including null terminator. */
-#define PULSE_TOKEN_BUFSIZE		(PULSE_TOKEN_LEN + 1U)
 
 typedef enum {
 	PULSE_STATUS_OK			= 0,
@@ -56,6 +45,27 @@ typedef enum {
 	 * No backlog entry was written. */
 	PULSE_STATUS_IN_PROGRESS	= -12,
 } pulse_status_t;
+
+/**
+ * @brief Callback invoked when a response is received from the ingest server.
+ *
+ * @param[in] data     Response payload bytes.
+ * @param[in] datasize Payload length in bytes.
+ * @param[in] ctx      User context pointer supplied to
+ *                     pulse_set_response_handler().
+ */
+typedef void (*pulse_response_handler_t)(const void *data, size_t datasize,
+		void *ctx);
+
+/**
+ * @brief Callback invoked before metrics collection.
+ *
+ * Use this hook to refresh application-owned state before reporting.
+ *
+ * @param[in] ctx User context pointer supplied to
+ *                pulse_set_prepare_handler().
+ */
+typedef void (*pulse_prepare_handler_t)(void *ctx);
 
 struct pulse {
 	/**
@@ -136,17 +146,6 @@ pulse_status_t pulse_update_token(const char *token);
 pulse_status_t pulse_update_metricfs(struct metricfs *mfs);
 
 /**
- * @brief Callback invoked when a response is received from the ingest server.
- *
- * @param[in] data     Response payload bytes.
- * @param[in] datasize Payload length in bytes.
- * @param[in] ctx      User context pointer supplied to
- *                     pulse_set_response_handler().
- */
-typedef void (*pulse_response_handler_t)(const void *data, size_t datasize,
-		void *ctx);
-
-/**
  * @brief Register a handler called when the ingest server returns a response.
  *
  * Decouples the SDK transport layer from application-specific response
@@ -162,10 +161,24 @@ pulse_status_t pulse_set_response_handler(pulse_response_handler_t handler,
 		void *ctx);
 
 /**
+ * @brief Register a handler called before metrics collection.
+ *
+ * Pass NULL to unregister. The supplied @p ctx is forwarded to the handler on
+ * every invocation and is independent of the context stored in struct pulse.
+ *
+ * @param[in] handler Prepare handler, or NULL to disable.
+ * @param[in] ctx     User context pointer forwarded to @p handler.
+ * @return PULSE_STATUS_OK always.
+ */
+pulse_status_t pulse_set_prepare_handler(pulse_prepare_handler_t handler,
+		void *ctx);
+
+/**
  * @brief Report the current pulse status or metrics.
  *
  * Not thread-safe. Must not be called concurrently with pulse_update_token(),
- * pulse_update_metricfs(), pulse_set_response_handler(), or pulse_cancel().
+ * pulse_update_metricfs(), pulse_set_response_handler(),
+ * pulse_set_prepare_handler(), or pulse_cancel().
  *
  * @return Status code indicating success or failure.
  */

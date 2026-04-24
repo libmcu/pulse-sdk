@@ -11,9 +11,9 @@ the [Pulse](https://pulse.libmcu.org) ingest server.
 ```c
 #include "pulse/pulse.h"
 
-void metrics_report_prepare(void *ctx)
+static void update_metrics(void *ctx)
 {
-	metrics_increase(RunCount);
+	metrics_set(SensorValue, get_your_sensor_value());
 }
 
 void example(void)
@@ -24,6 +24,9 @@ void example(void)
 		return;
 	}
 
+	pulse_set_prepare_handler(update_metrics, NULL);
+
+	metrics_increase(RunCount);
 	pulse_report();
 }
 ```
@@ -35,7 +38,8 @@ void example(void)
 Example metrics.def file:
 
 ```c
-METRICS_DEFINE(RunCount)
+METRICS_DEFINE_COUNTER(RunCount)
+METRICS_DEFINE(SensorValue)
 ```
 
 ## Platform integration
@@ -104,7 +108,6 @@ target_link_libraries(your_target PRIVATE pulse-sdk)
 >
 > - `<libmcu>/modules/metrics/src/metrics.c`
 > - `<libmcu>/modules/metrics/src/metrics_overrides.c`
-> - `<libmcu>/modules/metrics/src/metrics_reporter.c`
 > - `<libmcu>/modules/common/src/assert.c`
 > - `<libmcu>/ports/metrics/cbor_encoder.c` (if present)
 > - `ports/<platform>/pulse_overrides.c`
@@ -176,7 +179,7 @@ Your application must also provide product-specific metric metadata expected by 
 - `metrics_get_serial_number_string()`
 - `metrics_get_version_string()`
 
-Transmission happens through `metrics_report_transmit(const void *data, size_t datasize, void *ctx)`.
+Transmission happens through `pulse_transport_transmit(const void *data, size_t datasize, const struct pulse_report_ctx *ctx)`.
 
 Platform ports included by Pulse SDK may provide timestamp and lock hooks, but the transmit path still needs a working implementation. On Linux and other generic ports, the built-in implementation is a weak stub that returns an I/O error unless your application overrides it.
 

@@ -44,7 +44,6 @@ PULSE_SDK_SRCS := \
 # must manually add the following to the build:
 #   $(LIBMCU_ROOT)/modules/metrics/src/metrics.c
 #   $(LIBMCU_ROOT)/modules/metrics/src/metrics_overrides.c
-#   $(LIBMCU_ROOT)/modules/metrics/src/metrics_reporter.c
 #   $(LIBMCU_ROOT)/modules/common/src/assert.c
 #   $(LIBMCU_ROOT)/ports/metrics/cbor_encoder.c  (if present)
 #   $(PULSE_SDK_ROOT)/ports/baremetal/pulse_overrides.c
@@ -55,7 +54,6 @@ ifeq ($(realpath $(LIBMCU_ROOT)),$(realpath $(PULSE_SDK_ROOT)/external/libmcu))
 	PULSE_SDK_SRCS += $(LIBMCU_ROOT)/modules/common/src/assert.c
 	PULSE_SDK_SRCS += $(LIBMCU_ROOT)/modules/metrics/src/metrics.c
 	PULSE_SDK_SRCS += $(LIBMCU_ROOT)/modules/metrics/src/metrics_overrides.c
-	PULSE_SDK_SRCS += $(LIBMCU_ROOT)/modules/metrics/src/metrics_reporter.c
 	PULSE_SDK_SRCS += $(PULSE_SDK_ROOT)/ports/baremetal/pulse_overrides.c
 	PULSE_SDK_SRCS += $(PULSE_SDK_ROOT)/ports/baremetal/pulse_transport_https.c
 	PULSE_SDK_SRCS += $(LIBMCU_ROOT)/ports/metrics/cbor_encoder.c
