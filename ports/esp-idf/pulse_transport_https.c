@@ -253,8 +253,6 @@ static int advance_session(https_session_t *s,
 	return finalize_session(s, rctx);
 }
 
-int metrics_report_transmit(const void *data, size_t datasize, void *ctx);
-
 #ifdef UNIT_TEST
 void metrics_report_reset(void);
 
@@ -274,7 +272,7 @@ void pulse_transport_cancel(void)
 	reset_session(&m_session);
 }
 
-int metrics_report_transmit(const void *data, size_t datasize, void *ctx)
+int pulse_transport_transmit(const void *data, size_t datasize, void *ctx)
 {
 	(void)ctx;
 

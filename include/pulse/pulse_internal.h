@@ -39,5 +39,6 @@ struct pulse_report_ctx {
 };
 
 const struct pulse_report_ctx *pulse_get_report_ctx(void);
+int pulse_transport_transmit(const void *data, size_t datasize, void *ctx);
 
 #endif /* PULSE_INTERNAL_H */

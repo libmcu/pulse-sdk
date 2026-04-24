@@ -13,7 +13,7 @@
 #define PULSE_WEAK
 #endif
 
-PULSE_WEAK int metrics_report_transmit(const void *data, size_t datasize,
+PULSE_WEAK int pulse_transport_transmit(const void *data, size_t datasize,
 		void *ctx)
 {
 	(void)data;

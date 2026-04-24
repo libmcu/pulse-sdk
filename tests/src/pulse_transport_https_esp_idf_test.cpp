@@ -15,7 +15,6 @@ extern "C" {
 #include "pulse/pulse_internal.h"
 #include "pulse/pulse_overrides.h"
 
-int metrics_report_transmit(const void *data, size_t datasize, void *ctx);
 void metrics_report_reset(void);
 }
 
@@ -47,14 +46,14 @@ TEST_GROUP(PulseTransportHttpsEspIdf)
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnInvalidArgumentWhenPayloadIsNull)
 {
-	CHECK_EQUAL(-EINVAL, metrics_report_transmit(NULL, 1u, NULL));
+	CHECK_EQUAL(-EINVAL, pulse_transport_transmit(NULL, 1u, NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnInvalidArgumentWhenDataSizeIsZero)
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	CHECK_EQUAL(-EINVAL, metrics_report_transmit(payload, 0u, NULL));
+	CHECK_EQUAL(-EINVAL, pulse_transport_transmit(payload, 0u, NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnOverflowWhenDataSizeExceedsIntMax)
@@ -62,7 +61,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnOverflowWhenDataSizeExceedsIntMax)
 	static const uint8_t payload[] = { 0x01 };
 
 	CHECK_EQUAL(-EOVERFLOW,
-			metrics_report_transmit(payload,
+			pulse_transport_transmit(payload,
 					(size_t)INT_MAX + 1u, NULL));
 }
 
@@ -74,7 +73,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnNoMemoryWhenClientInitFails)
 		.andReturnValue((void *)0);
 
 	CHECK_EQUAL(-ENOMEM,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldInitClientWithAsyncAndEventHandler)
@@ -97,7 +96,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldInitClientWithAsyncAndEventHandler)
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	metrics_report_transmit(payload, sizeof(payload), NULL);
+	pulse_transport_transmit(payload, sizeof(payload), NULL);
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldInitClientWithConfiguredTransmitTimeout)
@@ -120,7 +119,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldInitClientWithConfiguredTransmitTimeout)
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	metrics_report_transmit(payload, sizeof(payload), NULL);
+	pulse_transport_transmit(payload, sizeof(payload), NULL);
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenSetMethodFails)
@@ -136,7 +135,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenSetMethodFails)
 		.andReturnValue((int)ESP_OK);
 
 	CHECK_EQUAL(-EIO,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenContentTypeHeaderFails)
@@ -153,7 +152,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenContentTypeHeaderFails)
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(-EIO, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(-EIO, pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenPostFieldFails)
@@ -174,7 +173,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenPostFieldFails)
 		.andReturnValue((int)ESP_OK);
 
 	CHECK_EQUAL(-EIO,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenAuthorizationHeaderFails)
@@ -198,7 +197,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenAuthorizationHeaderFails)
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(-EIO, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(-EIO, pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenTokenTooLongToFitAuthHeader)
@@ -223,7 +222,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenTokenTooLongToFitAuthHeader)
 		.andReturnValue((int)ESP_OK);
 
 	CHECK_EQUAL(-EIO,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnEinprogressWhenAsyncPerformIsNotYetComplete)
@@ -245,7 +244,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnEinprogressWhenAsyncPerformIsNotYetC
 		.andReturnValue((int)ESP_ERR_HTTP_EAGAIN);
 
 	CHECK_EQUAL(-EINPROGRESS,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnEinprogressOnSubsequentCallWhenAsyncStillInProgress)
@@ -267,7 +266,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnEinprogressOnSubsequentCallWhenAsync
 		.andReturnValue((int)ESP_ERR_HTTP_EAGAIN);
 
 	CHECK_EQUAL(-EINPROGRESS,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 
 	mock().checkExpectations();
 	mock().clear();
@@ -276,7 +275,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnEinprogressOnSubsequentCallWhenAsync
 		.andReturnValue((int)ESP_ERR_HTTP_EAGAIN);
 
 	CHECK_EQUAL(-EINPROGRESS,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldCompleteAndCleanupWhenAsyncPerformSucceeds)
@@ -298,7 +297,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldCompleteAndCleanupWhenAsyncPerformSucceeds
 		.andReturnValue((int)ESP_ERR_HTTP_EAGAIN);
 
 	CHECK_EQUAL(-EINPROGRESS,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 
 	mock().checkExpectations();
 	mock().clear();
@@ -311,7 +310,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldCompleteAndCleanupWhenAsyncPerformSucceeds
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(0, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(0, pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf,
@@ -330,7 +329,7 @@ TEST(PulseTransportHttpsEspIdf,
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	metrics_report_transmit(payload, sizeof(payload), NULL);
+	pulse_transport_transmit(payload, sizeof(payload), NULL);
 }
 
 TEST(PulseTransportHttpsEspIdf,
@@ -356,7 +355,7 @@ TEST(PulseTransportHttpsEspIdf,
 		.andReturnValue((int)ESP_OK);
 
 	CHECK_EQUAL(-ETIMEDOUT,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenServerRespondsWithFailureStatus)
@@ -381,7 +380,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenServerRespondsWithFailureStatu
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(-EIO, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(-EIO, pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldCleanupClientWhenCancelCalledWhileInProgress)
@@ -403,7 +402,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldCleanupClientWhenCancelCalledWhileInProgre
 		.andReturnValue((int)ESP_ERR_HTTP_EAGAIN);
 
 	CHECK_EQUAL(-EINPROGRESS,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 
 	mock().checkExpectations();
 	mock().clear();
@@ -439,7 +438,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldResetStateAfterCancelSoNextTransmitStartsF
 	mock().expectOneCall("esp_http_client_perform").ignoreOtherParameters()
 		.andReturnValue((int)ESP_ERR_HTTP_EAGAIN);
 
-	metrics_report_transmit(payload, sizeof(payload), NULL);
+	pulse_transport_transmit(payload, sizeof(payload), NULL);
 
 	mock().checkExpectations();
 	mock().clear();
@@ -468,7 +467,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldResetStateAfterCancelSoNextTransmitStartsF
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(0, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(0, pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnOkWhenStatusCodeIs200)
@@ -493,7 +492,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnOkWhenStatusCodeIs200)
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(0, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(0, pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnOkWhenStatusCodeIs299)
@@ -518,7 +517,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnOkWhenStatusCodeIs299)
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(0, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(0, pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenStatusCodeIs199)
@@ -544,7 +543,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenStatusCodeIs199)
 		.andReturnValue((int)ESP_OK);
 
 	CHECK_EQUAL(-EIO,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenStatusCodeIs300)
@@ -570,7 +569,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenStatusCodeIs300)
 		.andReturnValue((int)ESP_OK);
 
 	CHECK_EQUAL(-EIO,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldMapEspTimeoutToErrnoTimeout)
@@ -593,7 +592,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldMapEspTimeoutToErrnoTimeout)
 		.andReturnValue((int)ESP_OK);
 
 	CHECK_EQUAL(-ETIMEDOUT,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenCleanupFailsAfterSuccess)
@@ -619,7 +618,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldReturnIoWhenCleanupFailsAfterSuccess)
 		.andReturnValue((int)ESP_FAIL);
 
 	CHECK_EQUAL(-EIO,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf, ShouldSendAuthorizationHeaderWhenTokenProvided)
@@ -653,7 +652,7 @@ TEST(PulseTransportHttpsEspIdf, ShouldSendAuthorizationHeaderWhenTokenProvided)
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(0, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(0, pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 static void test_response_handler(const void *data, size_t datasize, void *ctx)
@@ -704,7 +703,7 @@ TEST(PulseTransportHttpsEspIdf,
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(0, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(0, pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf,
@@ -735,7 +734,7 @@ TEST(PulseTransportHttpsEspIdf,
 		.andReturnValue((int)ESP_ERR_HTTP_EAGAIN);
 
 	CHECK_EQUAL(-EINPROGRESS,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 
 	if (g_captured_event_handler != NULL) {
 		esp_http_client_event_t evt = {};
@@ -766,7 +765,7 @@ TEST(PulseTransportHttpsEspIdf,
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(0, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(0, pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf,
@@ -797,7 +796,7 @@ TEST(PulseTransportHttpsEspIdf,
 		.andReturnValue((int)ESP_ERR_HTTP_EAGAIN);
 
 	CHECK_EQUAL(-EINPROGRESS,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 
 	if (g_captured_event_handler != NULL) {
 		esp_http_client_event_t evt = {};
@@ -825,7 +824,7 @@ TEST(PulseTransportHttpsEspIdf,
 		.andReturnValue((int)ESP_OK);
 
 	CHECK_EQUAL(-EMSGSIZE,
-			metrics_report_transmit(payload, sizeof(payload), NULL));
+			pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf,
@@ -855,7 +854,7 @@ TEST(PulseTransportHttpsEspIdf,
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(0, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(0, pulse_transport_transmit(payload, sizeof(payload), NULL));
 }
 
 TEST(PulseTransportHttpsEspIdf,
@@ -882,7 +881,7 @@ TEST(PulseTransportHttpsEspIdf,
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(0, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(0, pulse_transport_transmit(payload, sizeof(payload), NULL));
 
 	mock().checkExpectations();
 	mock().clear();
@@ -904,5 +903,5 @@ TEST(PulseTransportHttpsEspIdf,
 	mock().expectOneCall("esp_http_client_cleanup").ignoreOtherParameters()
 		.andReturnValue((int)ESP_OK);
 
-	CHECK_EQUAL(0, metrics_report_transmit(payload, sizeof(payload), NULL));
+	CHECK_EQUAL(0, pulse_transport_transmit(payload, sizeof(payload), NULL));
 }

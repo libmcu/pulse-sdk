@@ -11,13 +11,14 @@
 #include <libmcu/metrics.h>
 
 #include "pulse/pulse.h"
+#include "pulse/pulse_internal.h"
 
 static struct {
 	uint8_t buf[128];
 	size_t len;
 } loopback;
 
-int metrics_report_transmit(const void *data, size_t datasize, void *ctx)
+int pulse_transport_transmit(const void *data, size_t datasize, void *ctx)
 {
 	(void)ctx;
 	if (datasize > sizeof(loopback.buf)) {

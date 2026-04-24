@@ -176,7 +176,7 @@ Your application must also provide product-specific metric metadata expected by 
 - `metrics_get_serial_number_string()`
 - `metrics_get_version_string()`
 
-Transmission happens through `metrics_report_transmit(const void *data, size_t datasize, void *ctx)`.
+Transmission happens through `pulse_transport_transmit(const void *data, size_t datasize, void *ctx)`.
 
 Platform ports included by Pulse SDK may provide timestamp and lock hooks, but the transmit path still needs a working implementation. On Linux and other generic ports, the built-in implementation is a weak stub that returns an I/O error unless your application overrides it.
 

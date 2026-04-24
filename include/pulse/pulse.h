@@ -15,7 +15,6 @@ extern "C" {
 
 #include "libmcu/metrics.h"
 #include "libmcu/metricfs.h"
-#include "libmcu/metrics_reporter.h"
 #include "libmcu/metrics_overrides.h"
 
 #define PULSE_INGEST_HOST	"ingest.libmcu.org"

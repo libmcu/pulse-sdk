@@ -277,7 +277,7 @@ static pulse_status_t abort_flight(int transmit_err)
 
 static pulse_status_t do_transmit(void)
 {
-	int err = metrics_report_transmit(m.flight_buf,
+	int err = pulse_transport_transmit(m.flight_buf,
 			m.flight_len, m.user_ctx);
 
 	if (err == 0) {

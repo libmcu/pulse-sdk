@@ -13,6 +13,7 @@
 #include <libmcu/metrics.h>
 
 #include "pulse/pulse.h"
+#include "pulse/pulse_internal.h"
 
 struct loopback_ctx {
 	uint8_t buf[128];
@@ -21,7 +22,7 @@ struct loopback_ctx {
 
 static struct loopback_ctx loopback;
 
-int metrics_report_transmit(const void *data, size_t datasize, void *ctx)
+int pulse_transport_transmit(const void *data, size_t datasize, void *ctx)
 {
 	(void)ctx;
 	if (datasize > sizeof(loopback.buf)) {
