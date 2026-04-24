@@ -171,7 +171,7 @@ pulse_status_t pulse_set_response_handler(pulse_response_handler_t handler,
 		void *ctx);
 
 /**
- * @brief Register a handler called before metrics_report_prepare().
+ * @brief Register a handler called before metrics collection.
  *
  * Pass NULL to unregister. The supplied @p ctx is forwarded to the handler on
  * every invocation and is independent of the context stored in struct pulse.

@@ -210,8 +210,6 @@ static void invoke_prepare_chain(void)
 	if (m.on_prepare != NULL) {
 		m.on_prepare(m.prepare_ctx);
 	}
-
-	metrics_report_prepare(m.user_ctx);
 }
 
 static void free_flight_buf(void)
@@ -278,7 +276,7 @@ static pulse_status_t abort_flight(int transmit_err)
 static pulse_status_t do_transmit(void)
 {
 	int err = pulse_transport_transmit(m.flight_buf,
-			m.flight_len, m.user_ctx);
+			m.flight_len, &m);
 
 	if (err == 0) {
 		return commit_flight();
@@ -368,12 +366,6 @@ static pulse_status_t do_collect(void)
 
 	return collect_from_live_metrics();
 }
-
-const struct pulse_report_ctx *pulse_get_report_ctx(void)
-{
-	return &m;
-}
-
 pulse_status_t pulse_update_token(const char *token)
 {
 	if (!is_token_valid(token)) {

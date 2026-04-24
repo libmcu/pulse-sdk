@@ -18,7 +18,8 @@ static struct {
 	size_t len;
 } loopback;
 
-int pulse_transport_transmit(const void *data, size_t datasize, void *ctx)
+int pulse_transport_transmit(const void *data, size_t datasize,
+		const struct pulse_report_ctx *ctx)
 {
 	(void)ctx;
 	if (datasize > sizeof(loopback.buf)) {

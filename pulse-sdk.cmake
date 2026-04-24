@@ -101,7 +101,6 @@ function(pulse_sdk_collect out_srcs out_public_incs out_private_incs)
 	# the caller is responsible for adding the following sources to the build:
 	#   - <libmcu>/modules/metrics/src/metrics.c
 	#   - <libmcu>/modules/metrics/src/metrics_overrides.c
-	#   - <libmcu>/modules/metrics/src/metrics_reporter.c
 	#   - <libmcu>/modules/common/src/assert.c
 	#   - <libmcu>/ports/metrics/cbor_encoder.c (if available)
 	#   - ports/<platform>/pulse_overrides.c
@@ -113,8 +112,7 @@ function(pulse_sdk_collect out_srcs out_public_incs out_private_incs)
 			${PULSE_SDK_ROOT}/ports/pulse_metricfs_stub.c
 			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/common/src/assert.c
 			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metrics.c
-			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metrics_overrides.c
-			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metrics_reporter.c)
+			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metrics_overrides.c)
 
 		if(EXISTS "${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/ports/metrics/cbor_encoder.c")
 			list(APPEND _srcs ${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/ports/metrics/cbor_encoder.c)

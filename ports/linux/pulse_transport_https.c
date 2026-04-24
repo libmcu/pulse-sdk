@@ -13,8 +13,10 @@
 #define PULSE_WEAK
 #endif
 
+struct pulse_report_ctx;
+
 PULSE_WEAK int pulse_transport_transmit(const void *data, size_t datasize,
-		void *ctx)
+		const struct pulse_report_ctx *ctx)
 {
 	(void)data;
 	(void)datasize;

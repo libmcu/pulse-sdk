@@ -5,7 +5,6 @@ LIBMCU_ROOT = ../build/_deps/external_libmcu-src
 SRC_FILES = \
 	../src/pulse.c \
 	$(LIBMCU_ROOT)/modules/metrics/src/metrics.c \
-	$(LIBMCU_ROOT)/modules/metrics/src/metrics_reporter.c \
 	$(LIBMCU_ROOT)/modules/metrics/src/metrics_overrides.c \
 
 TEST_SRC_FILES = \
