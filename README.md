@@ -3,8 +3,8 @@
 [한국어 문서 보기](README.ko.md)
 
 Pulse SDK collects device metrics using
-[libmcu/metrics](https://github.com/libmcu/libmcu/metrics) and sends them to
-the [Pulse](https://pulse.libmcu.org) ingest server.
+[libmcu/metrics](https://github.com/libmcu/libmcu/tree/main/modules/metrics)
+and sends them to the [Pulse](https://pulse.libmcu.org) ingest server.
 
 ## Usage example
 

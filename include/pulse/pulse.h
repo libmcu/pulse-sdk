@@ -16,6 +16,11 @@ extern "C" {
 #include "libmcu/metrics.h"
 #include "libmcu/metricfs.h"
 
+/* 256-bit token encoded in URL-safe Base64, excluding null terminator. */
+#define PULSE_TOKEN_LEN			43U
+/* Buffer size required to hold the authentication token including null terminator. */
+#define PULSE_TOKEN_BUFSIZE		(PULSE_TOKEN_LEN + 1U)
+
 typedef enum {
 	PULSE_STATUS_OK			= 0,
 	PULSE_STATUS_INVALID_ARGUMENT	= -1,

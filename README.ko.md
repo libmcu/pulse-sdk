@@ -2,7 +2,7 @@
 
 [English README](README.md)
 
-Pulse SDK는 [libmcu/metrics](https://github.com/libmcu/libmcu/metrics)를
+Pulse SDK는 [libmcu/metrics](https://github.com/libmcu/libmcu/tree/main/modules/metrics)를
 사용하여 디바이스 메트릭을 수집하고,
 이를 [Pulse](https://pulse.libmcu.org) ingest 서버로 전송합니다.
 
