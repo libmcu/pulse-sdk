@@ -7,25 +7,15 @@
 #ifndef PULSE_H
 #define PULSE_H
 
-#include <stdint.h>
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
 
+#include <stdint.h>
+
 #include "libmcu/metrics.h"
 #include "libmcu/metricfs.h"
 #include "libmcu/metrics_overrides.h"
-
-#define PULSE_INGEST_HOST	"ingest.libmcu.org"
-#define PULSE_INGEST_PATH	"/v1"
-#define PULSE_INGEST_URL_HTTPS	"https://" PULSE_INGEST_HOST PULSE_INGEST_PATH
-#define PULSE_INGEST_URL_COAPS	"coaps://" PULSE_INGEST_HOST PULSE_INGEST_PATH
-
-/* 256-bit token encoded in URL-safe Base64, excluding null terminator. */
-#define PULSE_TOKEN_LEN			43U
-/* Buffer size required to hold the authentication token including null terminator. */
-#define PULSE_TOKEN_BUFSIZE		(PULSE_TOKEN_LEN + 1U)
 
 typedef enum {
 	PULSE_STATUS_OK			= 0,

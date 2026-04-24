@@ -11,10 +11,9 @@ the [Pulse](https://pulse.libmcu.org) ingest server.
 ```c
 #include "pulse/pulse.h"
 
-static void prepare_metrics(void *ctx)
+static void update_metrics(void *ctx)
 {
-	(void)ctx;
-	metrics_increase(RunCount);
+	metrics_set(SensorValue, get_your_sensor_value());
 }
 
 void example(void)
@@ -25,8 +24,9 @@ void example(void)
 		return;
 	}
 
-	pulse_set_prepare_handler(prepare_metrics, NULL);
+	pulse_set_prepare_handler(update_metrics, NULL);
 
+	metrics_increase(RunCount);
 	pulse_report();
 }
 ```
@@ -38,7 +38,8 @@ void example(void)
 Example metrics.def file:
 
 ```c
-METRICS_DEFINE(RunCount)
+METRICS_DEFINE_COUNTER(RunCount)
+METRICS_DEFINE(SensorValue)
 ```
 
 ## Platform integration

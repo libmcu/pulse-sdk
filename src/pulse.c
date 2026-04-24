@@ -321,11 +321,6 @@ static pulse_status_t collect_from_live_metrics(void)
 	invoke_prepare_chain();
 
 	m.flight_len = metrics_collect(m.flight_buf, m.flight_bufsize);
-	if (m.flight_len == 0u) {
-		free_flight_buf();
-		return has_backlog() ?
-			PULSE_STATUS_BACKLOG_PENDING : PULSE_STATUS_EMPTY;
-	}
 
 	if (m.flight_len > m.flight_bufsize) {
 		free_flight_buf();
@@ -345,9 +340,6 @@ static pulse_status_t do_collect(void)
 	size_t payload_bufsize;
 
 	payload_len = metrics_collect(NULL, 0u);
-	if (payload_len == 0u && !has_backlog()) {
-		return PULSE_STATUS_EMPTY;
-	}
 
 	status = derive_payload_bufsize(payload_len, &payload_bufsize);
 	if (status != PULSE_STATUS_OK) {

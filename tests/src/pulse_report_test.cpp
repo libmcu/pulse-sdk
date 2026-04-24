@@ -174,9 +174,13 @@ TEST(PulseReport, ShouldReturnNotSupportedWhenTransportIsUnavailable)
 	CHECK_EQUAL(PULSE_STATUS_NOT_SUPPORTED, pulse_report());
 }
 
-TEST(PulseReport, ShouldReturnEmptyWhenNoMetricsCollected)
+TEST(PulseReport, ShouldTransmitHeartbeatWhenNoMetricsSet)
 {
-	CHECK_EQUAL(PULSE_STATUS_EMPTY, pulse_report());
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
 TEST(PulseReport, ShouldReturnInvalidArgumentWhenInitCalledWithNull)
@@ -475,7 +479,10 @@ TEST(PulseReport, ShouldClearInFlightAfterSuccessfulAsyncCompletion)
 		.andReturnValue(0);
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 
-	CHECK_EQUAL(PULSE_STATUS_EMPTY, pulse_report());
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
 TEST(PulseReport, ShouldUpdateLastReportTimeAfterAsyncCompletion)
@@ -964,7 +971,11 @@ TEST(PulseReport, ShouldDeleteBacklogEntryAfterSuccessfulAsyncBacklogTransmit)
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 
 	CHECK_EQUAL(0u, metricfs_count((const struct metricfs *)(uintptr_t)1));
-	CHECK_EQUAL(PULSE_STATUS_EMPTY, pulse_report());
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
 TEST(PulseReport, ShouldNotRewriteBacklogWhenAsyncBacklogTransmitFails)

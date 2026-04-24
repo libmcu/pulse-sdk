@@ -7,10 +7,24 @@
 #ifndef PULSE_INTERNAL_H
 #define PULSE_INTERNAL_H
 
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #include <stddef.h>
 #include <stdbool.h>
 
 #include "pulse/pulse.h"
+
+#define PULSE_INGEST_HOST	"ingest.libmcu.org"
+#define PULSE_INGEST_PATH	"/v1"
+#define PULSE_INGEST_URL_HTTPS	"https://" PULSE_INGEST_HOST PULSE_INGEST_PATH
+#define PULSE_INGEST_URL_COAPS	"coaps://" PULSE_INGEST_HOST PULSE_INGEST_PATH
+
+/* 256-bit token encoded in URL-safe Base64, excluding null terminator. */
+#define PULSE_TOKEN_LEN			43U
+/* Buffer size required to hold the authentication token including null terminator. */
+#define PULSE_TOKEN_BUFSIZE		(PULSE_TOKEN_LEN + 1U)
 
 struct pulse_report_ctx {
 	void *user_ctx;
@@ -35,5 +49,9 @@ struct pulse_report_ctx {
 
 int pulse_transport_transmit(const void *data, size_t datasize,
 		const struct pulse_report_ctx *ctx);
+
+#if defined(__cplusplus)
+}
+#endif
 
 #endif /* PULSE_INTERNAL_H */
