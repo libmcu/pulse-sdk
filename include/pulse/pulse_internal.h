@@ -53,6 +53,15 @@ struct pulse_report_ctx {
 int pulse_transport_transmit(const void *data, size_t datasize,
 		const struct pulse_report_ctx *ctx);
 
+/**
+ * @brief Abort an in-progress transport session.
+ *
+ * Port hook called by pulse_cancel(). Override this function to perform
+ * platform-specific cleanup such as tearing down the transport session.
+ * Falls back to a no-op if not overridden.
+ */
+void pulse_transport_cancel(void);
+
 #if defined(__cplusplus)
 }
 #endif

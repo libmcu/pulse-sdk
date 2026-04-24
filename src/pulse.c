@@ -6,7 +6,6 @@
 
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
-#include "pulse/pulse_overrides.h"
 #include "pulse_codec.h"
 
 #include <errno.h>
