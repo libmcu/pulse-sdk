@@ -7,6 +7,8 @@
 #ifndef PULSE_H
 #define PULSE_H
 
+#include <stdint.h>
+
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -14,6 +16,7 @@ extern "C" {
 #include "libmcu/metrics.h"
 #include "libmcu/metricfs.h"
 #include "libmcu/metrics_reporter.h"
+#include "libmcu/metrics_overrides.h"
 
 #define PULSE_INGEST_HOST	"ingest.libmcu.org"
 #define PULSE_INGEST_PATH	"/v1"
@@ -48,6 +51,10 @@ typedef enum {
 	 * on the metricfs instance, then call pulse_report() again. */
 	PULSE_STATUS_BACKLOG_OVERFLOW	= -10,
 	PULSE_STATUS_NO_MEMORY		= -11,
+	/* Returned when an async transport is still in progress. The caller
+	 * must invoke pulse_report() again to advance the transfer.
+	 * No backlog entry was written. */
+	PULSE_STATUS_IN_PROGRESS	= -12,
 } pulse_status_t;
 
 struct pulse {
@@ -74,9 +81,16 @@ struct pulse {
 			pulse_update_metricfs(). */
 	void *ctx; /**< Optional. User context pointer passed through to the
 			transmit callback. */
+	uint32_t transmit_timeout_ms; /**< Optional. Maximum transmit time in
+			milliseconds. Set to 0 to use the platform default. */
 	bool reset_metrics_on_init; /**< When true, resets all metric counters
 			during pulse_init(). Set to false (default) to preserve
 			accumulated metric values across re-initialisation. */
+	bool async_transport; /**< When true, pulse_report() may return
+			PULSE_STATUS_IN_PROGRESS if a transfer is still in
+			progress; the caller must invoke pulse_report() again to
+			advance it. When false (default), pulse_report() blocks
+			until the transfer completes before returning. */
 };
 
 /**
@@ -150,9 +164,31 @@ pulse_status_t pulse_set_response_handler(pulse_response_handler_t handler,
 /**
  * @brief Report the current pulse status or metrics.
  *
+ * Not thread-safe. Must not be called concurrently with pulse_update_token(),
+ * pulse_update_metricfs(), pulse_set_response_handler(), or pulse_cancel().
+ *
  * @return Status code indicating success or failure.
  */
 pulse_status_t pulse_report(void);
+
+/**
+ * @brief Cancel an in-progress async transfer.
+ *
+ * May only be called when pulse_report() previously returned
+ * PULSE_STATUS_IN_PROGRESS. If a backlog backend is configured and the
+ * in-flight payload originated from live metrics (not from the backlog),
+ * the *current* metric state is re-encoded and saved to the backlog before
+ * clearing state, and PULSE_STATUS_BACKLOG_PENDING is returned. The original
+ * in-flight snapshot is discarded; any metric updates recorded after the
+ * initial pulse_report() call are included in the saved entry.
+ * Otherwise PULSE_STATUS_OK is returned. After a successful cancel,
+ * pulse_report() may be called again.
+ *
+ * @return PULSE_STATUS_BACKLOG_PENDING if the current metric state was saved.
+ * @return PULSE_STATUS_OK if cancelled without saving.
+ * @return PULSE_STATUS_INVALID_ARGUMENT if no transfer is in progress.
+ */
+pulse_status_t pulse_cancel(void);
 
 /**
  * @brief Convert a pulse_status_t value to a human-readable string.
