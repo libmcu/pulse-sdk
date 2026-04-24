@@ -71,3 +71,16 @@ int _write(int fd, const void *buf, size_t count)
 	(void)buf;
 	return (int)count;
 }
+
+int _getpid(void)
+{
+	return 1;
+}
+
+int _kill(int pid, int sig)
+{
+	(void)pid;
+	(void)sig;
+	errno = EINVAL;
+	return -1;
+}

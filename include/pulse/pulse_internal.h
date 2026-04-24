@@ -40,6 +40,9 @@ struct pulse_report_ctx {
 	uint8_t *flight_buf;
 	size_t flight_len;
 	size_t flight_bufsize;
+	uint64_t flight_window_start;
+	uint64_t flight_window_end;
+	uint8_t flight_reason;
 	bool flight_from_backlog;
 	bool in_flight;
 

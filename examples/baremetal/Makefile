@@ -19,7 +19,7 @@ OBJS := $(patsubst %.c,build/%.o,$(SRCS))
 all: build/example_pulse_baremetal
 
 build/example_pulse_baremetal: $(OBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 build/%.o: %.c
 	@mkdir -p $(dir $@)

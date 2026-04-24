@@ -65,6 +65,19 @@ if(BUILD_TESTING)
 	set(CPPUTEST_EXAMPLES OFF CACHE BOOL "" FORCE)
 	add_subdirectory(tests/cpputest EXCLUDE_FROM_ALL)
 
+	# Platform-specific and storage files are excluded so tests supply their own stubs.
+	set(_test_srcs ${PULSE_SDK_SRCS})
+	list(FILTER _test_srcs EXCLUDE REGEX "pulse_overrides\\.c$")
+	list(FILTER _test_srcs EXCLUDE REGEX "pulse_transport_https\\.c$")
+	list(FILTER _test_srcs EXCLUDE REGEX "metricfs\\.c$")
+	add_library(pulse-sdk-testable STATIC ${_test_srcs})
+	target_compile_features(pulse-sdk-testable PRIVATE c_std_99)
+	target_include_directories(pulse-sdk-testable
+		PUBLIC ${PULSE_SDK_PUBLIC_INCS}
+		PRIVATE ${PULSE_SDK_PRIVATE_INCS})
+	target_compile_definitions(pulse-sdk-testable
+		PRIVATE METRICS_USER_DEFINES="${CMAKE_CURRENT_SOURCE_DIR}/examples/metrics.def")
+
 	add_executable(test_pulse_report_cpp
 		tests/src/test_all.cpp
 		tests/src/pulse_report_test.cpp
@@ -75,7 +88,7 @@ if(BUILD_TESTING)
 	target_include_directories(test_pulse_report_cpp PRIVATE
 		${CMAKE_CURRENT_SOURCE_DIR}/tests/stubs)
 	target_link_libraries(test_pulse_report_cpp PRIVATE
-		${PROJECT_NAME}
+		pulse-sdk-testable
 		CppUTest::CppUTest
 		CppUTest::CppUTestExt)
 	add_test(NAME test_pulse_report_cpp COMMAND test_pulse_report_cpp)

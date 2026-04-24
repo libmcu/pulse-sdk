@@ -44,6 +44,9 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
 
+      - name: Run CppUTest tests
+        run: make -C tests
+
   build-linux:
     name: Build / Linux
     runs-on: ubuntu-latest

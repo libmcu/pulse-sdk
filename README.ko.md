@@ -18,7 +18,11 @@ static void update_metrics(void *ctx)
 
 void example(void)
 {
-	struct pulse conf = { .token = "example-token" };
+	struct pulse conf = {
+		.token = "example-token",
+		.serial_number = "device-1234",
+		.software_version = "1.0.0",
+	};
 
 	if (pulse_init(&conf) != PULSE_STATUS_OK) {
 		return;
@@ -34,6 +38,9 @@ void example(void)
 > [!NOTE]
 > 인증 토큰은 [Pulse](https://pulse.libmcu.org) 의 product setup에서 생성하시거나,
 > 이미 발급된 토큰을 그대로 사용하시면 됩니다. 준비된 토큰은 `pulse_init()`에 전달하시면 됩니다.
+> `struct pulse`의 `token`, `serial_number`, `software_version`은 필수 항목임.
+> 세 값 모두 `NULL`이 아니고 비어 있지 않은 null-terminated 문자열이어야 함.
+> null terminator 자체는 payload에 인코딩하지 않음.
 
 metrics.def 파일 예시:
 
@@ -154,10 +161,11 @@ Make 통합 시 `pulse-sdk.mk`는 아래 순서로 의존성을 해석합니다.
 2. `LIBMCU_ROOT` / `CBOR_ROOT`
 3. `external/libmcu` / `external/cbor`
 
-또한 애플리케이션은 `libmcu/metrics`가 기대하는 제품 메타데이터 hook를 제공해야 합니다.
+또한 애플리케이션은 필수 Pulse 메타데이터를 `struct pulse`로 직접 제공해야 함.
 
-- `metrics_get_serial_number_string()`
-- `metrics_get_version_string()`
+- `token`
+- `serial_number`
+- `software_version`
 
 실제 전송은 `pulse_transport_transmit(const void *data, size_t datasize, const struct pulse_report_ctx *ctx)`를 통해 수행됩니다.
 
