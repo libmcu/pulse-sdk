@@ -18,7 +18,6 @@
 #include "libmcu/metrics_overrides.h"
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
-#include "pulse/pulse_overrides.h"
 
 #define PULSE_HTTPS_TIMEOUT_MS		60000
 #define PULSE_HTTPS_BUFFER_SIZE		4096

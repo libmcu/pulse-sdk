@@ -57,6 +57,8 @@ endfunction()
 function(pulse_sdk_collect out_srcs out_public_incs out_private_incs)
 	set(_srcs
 		${PULSE_SDK_ROOT}/src/pulse.c
+		${PULSE_SDK_ROOT}/src/pulse_codec.c
+		${PULSE_SDK_ROOT}/src/pulse_metrics_cbor_encoder.c
 	)
 	set(_public_incs
 		${PULSE_SDK_ROOT}/include
@@ -100,23 +102,16 @@ function(pulse_sdk_collect out_srcs out_public_incs out_private_incs)
 	# When PULSE_SDK_LIBMCU_ROOT or LIBMCU_ROOT points to an external root,
 	# the caller is responsible for adding the following sources to the build:
 	#   - <libmcu>/modules/metrics/src/metrics.c
-	#   - <libmcu>/modules/metrics/src/metrics_overrides.c
+	#   - <libmcu>/modules/metrics/src/metricfs.c
 	#   - <libmcu>/modules/common/src/assert.c
-	#   - <libmcu>/ports/metrics/cbor_encoder.c (if available)
 	#   - ports/<platform>/pulse_overrides.c
 	#   - ports/<platform>/pulse_transport_https.c
-	#   - ports/pulse_metricfs_stub.c
 	if(_PULSE_SDK_LIBMCU_RESOLVED_ROOT_SOURCE STREQUAL "bundled" OR
 			_PULSE_SDK_LIBMCU_RESOLVED_ROOT_SOURCE STREQUAL "fetched")
 		list(APPEND _srcs
-			${PULSE_SDK_ROOT}/ports/pulse_metricfs_stub.c
 			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/common/src/assert.c
 			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metrics.c
-			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metrics_overrides.c)
-
-		if(EXISTS "${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/ports/metrics/cbor_encoder.c")
-			list(APPEND _srcs ${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/ports/metrics/cbor_encoder.c)
-		endif()
+			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metricfs.c)
 
 		if(COMMAND idf_component_register AND
 				EXISTS "${PULSE_SDK_ROOT}/ports/esp-idf/pulse_overrides.c")

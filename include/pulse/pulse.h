@@ -15,7 +15,6 @@ extern "C" {
 
 #include "libmcu/metrics.h"
 #include "libmcu/metricfs.h"
-#include "libmcu/metrics_overrides.h"
 
 typedef enum {
 	PULSE_STATUS_OK			= 0,
@@ -81,14 +80,18 @@ struct pulse {
 	 * terminator). pulse_update_token() enforces this limit and returns
 	 * PULSE_STATUS_INVALID_ARGUMENT on violation.
 	 *
-	 * Optional at init time: may be NULL if the token is not yet available.
-	 * Supply it later via pulse_update_token() before calling
-	 * pulse_report().
+	 * Required at init time: must be non-NULL and not empty.
 	 */
 	const char *token;
 	struct metricfs *mfs; /**< Optional. Backlog storage backend.
-			NULL disables backlog. Can be changed after init via
-			pulse_update_metricfs(). */
+			NULL disables backlog. Entries are replayed oldest-first.
+			Can be changed after init via pulse_update_metricfs(). */
+	const char *serial_number; /**< Required device serial metadata.
+			Must be non-NULL, non-empty, and null-terminated.
+			The null terminator is not encoded into the payload. */
+	const char *software_version; /**< Required software version metadata.
+			Must be non-NULL, non-empty, and null-terminated.
+			The null terminator is not encoded into the payload. */
 	void *ctx; /**< Optional. User context pointer passed through to the
 			transmit callback. */
 	uint32_t transmit_timeout_ms; /**< Optional. Maximum transmit time in
@@ -118,8 +121,7 @@ pulse_status_t pulse_init(struct pulse *pulse);
  * @brief Update the authentication token after initialization.
  *
  * The token pointer must remain valid for the lifetime of the module.
- * Use this when the token is not available at init time (e.g. loaded
- * asynchronously from secure storage).
+ * Use this to rotate or replace the token after initialization.
  *
  * @param[in] token Non-NULL pointer to the authentication token string.
  *                  The pointer is borrowed: the buffer must remain valid

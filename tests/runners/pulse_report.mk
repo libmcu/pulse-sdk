@@ -2,12 +2,19 @@ COMPONENT_NAME = PulseReport
 
 LIBMCU_ROOT = ../build/_deps/external_libmcu-src
 
+CBOR_ROOT = ../build/_deps/external_cbor-src
+
+include $(CBOR_ROOT)/cbor.mk
+
 SRC_FILES = \
 	../src/pulse.c \
+	../src/pulse_codec.c \
+	../src/pulse_metrics_cbor_encoder.c \
+	$(CBOR_SRCS) \
 	$(LIBMCU_ROOT)/modules/metrics/src/metrics.c \
-	$(LIBMCU_ROOT)/modules/metrics/src/metrics_overrides.c \
 
 TEST_SRC_FILES = \
+	src/pulse_codec_test.cpp \
 	src/pulse_report_test.cpp \
 	src/test_all.cpp \
 	stubs/metricfs_stub.c \
@@ -20,6 +27,7 @@ INCLUDE_DIRS = \
 	$(LIBMCU_ROOT)/modules/metrics/include \
 	$(LIBMCU_ROOT)/modules/common/include \
 	$(LIBMCU_ROOT)/interfaces/kvstore/include \
+	$(CBOR_INCS) \
 
 MOCKS_SRC_DIRS =
 

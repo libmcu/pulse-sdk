@@ -12,8 +12,7 @@ extern "C" {
 #include "esp_timer.h"
 
 #include "pulse/pulse.h"
-	#include "pulse/pulse_internal.h"
-	#include "pulse/pulse_overrides.h"
+#include "pulse/pulse_internal.h"
 }
 
 static struct pulse_report_ctx g_report_ctx;

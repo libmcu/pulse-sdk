@@ -6,7 +6,7 @@
 
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
-#include "pulse/pulse_overrides.h"
+#include "pulse_codec.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -17,6 +17,7 @@
 #include <limits.h>
 
 #include "libmcu/compiler.h"
+#include "libmcu/metrics_overrides.h"
 
 #if !defined(PULSE_STATIC_PAYLOAD_BUFSIZE)
 #define PULSE_STATIC_PAYLOAD_BUFSIZE	0u
@@ -60,6 +61,113 @@ static size_t get_cbor_encoded_int_size(int64_t value)
 	return get_cbor_encoded_uint_size((uint64_t)(-1 - value));
 }
 
+static bool is_in_flight(void)
+{
+	return m.in_flight;
+}
+
+static bool is_initialized(void)
+{
+	return m.initialized;
+}
+
+static bool is_required_string_valid(const char *value)
+{
+	return value != NULL && value[0] != '\0';
+}
+
+static bool is_token_valid(const char *token)
+{
+	return is_required_string_valid(token) && strlen(token) <= PULSE_TOKEN_LEN;
+}
+
+static bool is_metadata_valid(const struct pulse *pulse)
+{
+	return is_required_string_valid(pulse->serial_number)
+		&& is_required_string_valid(pulse->software_version);
+}
+
+static bool has_backlog(void)
+{
+	return m.conf.mfs != NULL && metricfs_count(m.conf.mfs) > 0u;
+}
+
+static void set_in_flight(bool in_flight)
+{
+	m.in_flight = in_flight;
+}
+
+static void free_flight_buf(void)
+{
+#if PULSE_STATIC_PAYLOAD_BUFSIZE == 0u
+	free(m.flight_buf);
+#endif
+	m.flight_buf = NULL;
+	m.flight_len = 0u;
+	m.flight_bufsize = 0u;
+	m.flight_window_start = 0u;
+	m.flight_window_end = 0u;
+	m.flight_reason = PULSE_SNAPSHOT_REASON_LIVE;
+	m.flight_from_backlog = false;
+}
+
+static void clear_in_flight(void)
+{
+	free_flight_buf();
+	set_in_flight(false);
+}
+
+static void set_last_report_time(uint64_t timestamp)
+{
+	m.last_report_time = timestamp;
+}
+
+static uint64_t get_last_report_time(void)
+{
+	return m.last_report_time;
+}
+
+static bool is_interval_reached(const uint64_t now)
+{
+	if (now == 0u) {
+		return true;
+	}
+
+	if (!m.periodic_initialized) {
+		return true;
+	}
+
+	if (now < get_last_report_time()) {
+		return false;
+	}
+
+	return (now - get_last_report_time()) >= METRICS_REPORT_INTERVAL_SEC;
+}
+
+static void invoke_prepare_chain(void)
+{
+	if (m.on_prepare != NULL) {
+		m.on_prepare(m.prepare_ctx);
+	}
+}
+
+static void set_live_window_bounds(void)
+{
+	const uint64_t now = metrics_get_unix_timestamp();
+
+	m.flight_window_end = now;
+	if (now == 0u) {
+		m.flight_window_start = 0u;
+		return;
+	}
+
+	if (m.periodic_initialized && get_last_report_time() <= now) {
+		m.flight_window_start = get_last_report_time();
+	} else {
+		m.flight_window_start = now;
+	}
+}
+
 static size_t get_max_metric_entry_size(void)
 {
 	const size_t key_size = get_cbor_encoded_uint_size(UINT16_MAX);
@@ -81,9 +189,11 @@ static size_t get_max_metric_entry_size(void)
 static pulse_status_t derive_payload_bufsize(size_t current_payload_len,
 		size_t *bufsize)
 {
+	struct pulse_envelope_ctx ctx;
 	const size_t metrics_max = metrics_count();
 	const size_t max_entry_size = get_max_metric_entry_size();
 	const size_t max_entries_size = metrics_max * max_entry_size;
+	size_t max_metrics_payload_len;
 
 	if (metrics_max > 0u &&
 			max_entries_size / metrics_max != max_entry_size) {
@@ -94,8 +204,22 @@ static pulse_status_t derive_payload_bufsize(size_t current_payload_len,
 		return PULSE_STATUS_OVERFLOW;
 	}
 
-	*bufsize = current_payload_len + max_entries_size;
-	if (*bufsize > SIZE_MAX - PULSE_PAYLOAD_MARGIN) {
+	max_metrics_payload_len = current_payload_len + max_entries_size;
+	if (max_metrics_payload_len < current_payload_len) {
+		return PULSE_STATUS_OVERFLOW;
+	}
+
+	ctx.serial_number = m.conf.serial_number;
+	ctx.software_version = m.conf.software_version;
+	ctx.timestamp = UINT64_MAX;
+	ctx.window_start = UINT64_MAX;
+	ctx.window_end = UINT64_MAX;
+	ctx.snapshot_reason = UINT8_MAX;
+
+	*bufsize = max_metrics_payload_len +
+		pulse_codec_max_envelope_overhead(&ctx, max_metrics_payload_len);
+	if (*bufsize < max_metrics_payload_len
+			|| *bufsize > SIZE_MAX - PULSE_PAYLOAD_MARGIN) {
 		return PULSE_STATUS_OVERFLOW;
 	}
 
@@ -153,80 +277,59 @@ static pulse_status_t map_metrics_report_error(int err)
 	}
 }
 
-static void set_last_report_time(uint64_t timestamp)
+static pulse_status_t collect_live_payload(uint8_t reason)
 {
-	m.last_report_time = timestamp;
-}
+	struct pulse_envelope_ctx ctx;
+	size_t metrics_len;
 
-static uint64_t get_last_report_time(void)
-{
-	return m.last_report_time;
-}
+	m.flight_reason = reason;
+	invoke_prepare_chain();
+	set_live_window_bounds();
 
-static bool has_backlog(void)
-{
-	return m.conf.mfs != NULL && metricfs_count(m.conf.mfs) > 0u;
-}
-
-static bool is_interval_reached(const uint64_t now)
-{
-	if (now == 0u) {
-		return true;
+	metrics_len = metrics_collect(m.flight_buf, m.flight_bufsize);
+	if (metrics_len > m.flight_bufsize) {
+		free_flight_buf();
+		return PULSE_STATUS_OVERFLOW;
 	}
 
-	if (!m.periodic_initialized) {
-		return true;
+	ctx.serial_number = m.conf.serial_number;
+	ctx.software_version = m.conf.software_version;
+	ctx.timestamp = m.flight_window_end;
+	ctx.window_start = m.flight_window_start;
+	ctx.window_end = m.flight_window_end;
+	ctx.snapshot_reason = m.flight_reason;
+
+	return pulse_codec_wrap_metrics_payload(m.flight_buf, m.flight_bufsize,
+			metrics_len, &ctx, &m.flight_len);
+}
+
+static pulse_status_t abort_flight(int transmit_err)
+{
+	bool saved_to_backlog = false;
+	pulse_status_t status;
+
+	if (!m.flight_from_backlog && m.conf.mfs != NULL) {
+		status = collect_live_payload((transmit_err == -ECANCELED)
+				? PULSE_SNAPSHOT_REASON_BACKLOG_CANCEL
+				: PULSE_SNAPSHOT_REASON_BACKLOG_FAILURE);
+		if (status == PULSE_STATUS_OK && m.flight_len > 0u &&
+				metricfs_write(m.conf.mfs, m.flight_buf,
+						m.flight_len, NULL) == 0) {
+			metrics_reset();
+			saved_to_backlog = true;
+		} else if (status != PULSE_STATUS_OK) {
+			clear_in_flight();
+			return status;
+		}
 	}
 
-	if (now < get_last_report_time()) {
-		return false;
+	clear_in_flight();
+
+	if (saved_to_backlog) {
+		return PULSE_STATUS_BACKLOG_PENDING;
 	}
 
-	return (now - get_last_report_time()) >= METRICS_REPORT_INTERVAL_SEC;
-}
-
-static bool is_in_flight(void)
-{
-	return m.in_flight;
-}
-
-static void set_in_flight(bool in_flight)
-{
-	m.in_flight = in_flight;
-}
-
-static bool is_initialized(void)
-{
-	return m.initialized;
-}
-
-static bool is_token_valid(const char *token)
-{
-	return token != NULL && strlen(token) <= PULSE_TOKEN_LEN;
-}
-
-static void invoke_prepare_chain(void)
-{
-	if (m.on_prepare != NULL) {
-		m.on_prepare(m.prepare_ctx);
-	}
-}
-
-static void free_flight_buf(void)
-{
-#if PULSE_STATIC_PAYLOAD_BUFSIZE == 0u
-	free(m.flight_buf);
-#endif
-	m.flight_buf = NULL;
-	m.flight_len = 0u;
-	m.flight_bufsize = 0u;
-	m.flight_from_backlog = false;
-}
-
-static void clear_in_flight(void)
-{
-	free_flight_buf();
-	set_in_flight(false);
+	return map_metrics_report_error(transmit_err);
 }
 
 static pulse_status_t commit_flight(void)
@@ -248,45 +351,6 @@ static pulse_status_t commit_flight(void)
 	clear_in_flight();
 
 	return (err == 0) ? PULSE_STATUS_OK : map_metrics_report_error(err);
-}
-
-static pulse_status_t abort_flight(int transmit_err)
-{
-	bool saved_to_backlog = false;
-
-	if (!m.flight_from_backlog && m.conf.mfs != NULL) {
-		invoke_prepare_chain();
-		m.flight_len = metrics_collect(m.flight_buf, m.flight_bufsize);
-		if (m.flight_len > 0u && metricfs_write(m.conf.mfs,
-				m.flight_buf, m.flight_len, NULL) == 0) {
-			metrics_reset();
-			saved_to_backlog = true;
-		}
-	}
-
-	clear_in_flight();
-
-	if (saved_to_backlog) {
-		return PULSE_STATUS_BACKLOG_PENDING;
-	}
-
-	return map_metrics_report_error(transmit_err);
-}
-
-static pulse_status_t do_transmit(void)
-{
-	int err = pulse_transport_transmit(m.flight_buf,
-			m.flight_len, &m);
-
-	if (err == 0) {
-		return commit_flight();
-	}
-
-	if (err == -EINPROGRESS) {
-		return PULSE_STATUS_IN_PROGRESS;
-	}
-
-	return abort_flight(err);
 }
 
 static pulse_status_t collect_from_backlog(void)
@@ -318,13 +382,9 @@ static pulse_status_t collect_from_backlog(void)
 
 static pulse_status_t collect_from_live_metrics(void)
 {
-	invoke_prepare_chain();
-
-	m.flight_len = metrics_collect(m.flight_buf, m.flight_bufsize);
-
-	if (m.flight_len > m.flight_bufsize) {
-		free_flight_buf();
-		return PULSE_STATUS_OVERFLOW;
+	pulse_status_t status = collect_live_payload(PULSE_SNAPSHOT_REASON_LIVE);
+	if (status != PULSE_STATUS_OK) {
+		return status;
 	}
 
 	m.flight_from_backlog = false;
@@ -358,6 +418,22 @@ static pulse_status_t do_collect(void)
 
 	return collect_from_live_metrics();
 }
+
+static pulse_status_t do_transmit(void)
+{
+	int err = pulse_transport_transmit(m.flight_buf, m.flight_len, &m);
+
+	if (err == 0) {
+		return commit_flight();
+	}
+
+	if (err == -EINPROGRESS) {
+		return PULSE_STATUS_IN_PROGRESS;
+	}
+
+	return abort_flight(err);
+}
+
 pulse_status_t pulse_update_token(const char *token)
 {
 	if (!is_token_valid(token)) {
@@ -396,7 +472,7 @@ pulse_status_t pulse_set_prepare_handler(pulse_prepare_handler_t handler,
 
 pulse_status_t pulse_report(void)
 {
-	if (!is_initialized() || !is_token_valid(m.conf.token)) {
+	if (!is_initialized()) {
 		return PULSE_STATUS_INVALID_ARGUMENT;
 	}
 
@@ -480,7 +556,7 @@ pulse_status_t pulse_init(struct pulse *pulse)
 		return PULSE_STATUS_INVALID_ARGUMENT;
 	}
 
-	if (pulse->token != NULL && strlen(pulse->token) > PULSE_TOKEN_LEN) {
+	if (!is_token_valid(pulse->token) || !is_metadata_valid(pulse)) {
 		return PULSE_STATUS_INVALID_ARGUMENT;
 	}
 

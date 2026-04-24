@@ -18,7 +18,11 @@ static void update_metrics(void *ctx)
 
 void example(void)
 {
-	struct pulse conf = { .token = "example-token" };
+	struct pulse conf = {
+		.token = "example-token",
+		.serial_number = "device-1234",
+		.software_version = "1.0.0",
+	};
 
 	if (pulse_init(&conf) != PULSE_STATUS_OK) {
 		return;
@@ -34,6 +38,9 @@ void example(void)
 > [!NOTE]
 > Create or copy your authentication token from product setup on
 > [Pulse](https://pulse.libmcu.org), then pass that token to `pulse_init()`.
+> `token`, `serial_number`, and `software_version` are required fields in
+> `struct pulse`. All three must be non-NULL, non-empty, null-terminated
+> strings. The null terminator is not encoded into the payload.
 
 Example metrics.def file:
 
@@ -109,7 +116,6 @@ target_link_libraries(your_target PRIVATE pulse-sdk)
 > - `<libmcu>/modules/metrics/src/metrics.c`
 > - `<libmcu>/modules/metrics/src/metrics_overrides.c`
 > - `<libmcu>/modules/common/src/assert.c`
-> - `<libmcu>/ports/metrics/cbor_encoder.c` (if present)
 > - `ports/<platform>/pulse_overrides.c`
 > - `ports/<platform>/pulse_transport_https.c`
 > - `ports/pulse_metricfs_stub.c`
@@ -174,10 +180,11 @@ When Make integration is used, `pulse-sdk.mk` resolves dependencies through:
 2. `LIBMCU_ROOT` / `CBOR_ROOT`
 3. `external/libmcu` / `external/cbor`
 
-Your application must also provide product-specific metric metadata expected by `libmcu/metrics`, especially:
+Your application must provide required Pulse metadata directly via `struct pulse`:
 
-- `metrics_get_serial_number_string()`
-- `metrics_get_version_string()`
+- `token`
+- `serial_number`
+- `software_version`
 
 Transmission happens through `pulse_transport_transmit(const void *data, size_t datasize, const struct pulse_report_ctx *ctx)`.
 
