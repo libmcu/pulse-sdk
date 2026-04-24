@@ -24,10 +24,24 @@ static void *last_transmit_ctx;
 
 static uint64_t fake_timestamp;
 static unsigned int transport_cancel_calls;
+static unsigned int prepare_handler_calls;
+static unsigned int metrics_prepare_calls;
+static unsigned int prepare_order;
+static unsigned int prepare_handler_order;
+static unsigned int metrics_prepare_order;
+static void *last_prepare_handler_ctx;
+static void *last_metrics_prepare_ctx;
 
 extern "C" uint64_t metrics_get_unix_timestamp(void)
 {
 	return fake_timestamp;
+}
+
+extern "C" void metrics_report_prepare(void *ctx)
+{
+	metrics_prepare_calls++;
+	last_metrics_prepare_ctx = ctx;
+	metrics_prepare_order = ++prepare_order;
 }
 
 extern "C" int metrics_report_transmit(const void *data, size_t datasize,
@@ -55,6 +69,13 @@ static void response_handler(const void *data, size_t datasize, void *ctx)
 	(void)data;
 	(void)datasize;
 	(void)ctx;
+}
+
+static void prepare_handler(void *ctx)
+{
+	prepare_handler_calls++;
+	last_prepare_handler_ctx = ctx;
+	prepare_handler_order = ++prepare_order;
 }
 
 static void init_pulse_default(void)
@@ -101,6 +122,13 @@ TEST_GROUP(PulseReport)
 		last_transmit_ctx = NULL;
 		fake_timestamp = 0u;
 		transport_cancel_calls = 0u;
+		prepare_handler_calls = 0u;
+		metrics_prepare_calls = 0u;
+		prepare_order = 0u;
+		prepare_handler_order = 0u;
+		metrics_prepare_order = 0u;
+		last_prepare_handler_ctx = NULL;
+		last_metrics_prepare_ctx = NULL;
 		metricfs_stub_reset();
 		metrics_reset();
 		metrics_report_periodic_reset();
@@ -227,6 +255,67 @@ TEST(PulseReport, ShouldClearResponseHandlerWhenReinitialized)
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_init(&conf));
 	CHECK_TRUE(pulse_get_report_ctx()->on_response == NULL);
 	POINTERS_EQUAL(NULL, pulse_get_report_ctx()->response_ctx);
+}
+
+TEST(PulseReport, ShouldCallPrepareHandlerBeforeMetricsReportPrepare)
+{
+	int report_ctx = 1;
+	int prepare_ctx = 2;
+	struct pulse conf = { .token = "test-token", .ctx = &report_ctx };
+
+	pulse_init(&conf);
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_set_prepare_handler(prepare_handler, &prepare_ctx));
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(11));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	CHECK_EQUAL(1u, prepare_handler_calls);
+	CHECK_EQUAL(1u, metrics_prepare_calls);
+	POINTERS_EQUAL(&prepare_ctx, last_prepare_handler_ctx);
+	POINTERS_EQUAL(&report_ctx, last_metrics_prepare_ctx);
+	CHECK_TRUE(prepare_handler_order < metrics_prepare_order);
+}
+
+TEST(PulseReport, ShouldClearPrepareHandlerWhenReinitialized)
+{
+	struct pulse conf = { .token = "test-token" };
+
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_set_prepare_handler(prepare_handler, &conf));
+	CHECK_TRUE(pulse_get_report_ctx()->on_prepare != NULL);
+	POINTERS_EQUAL(&conf, pulse_get_report_ctx()->prepare_ctx);
+
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_init(&conf));
+	CHECK_TRUE(pulse_get_report_ctx()->on_prepare == NULL);
+	POINTERS_EQUAL(NULL, pulse_get_report_ctx()->prepare_ctx);
+}
+
+TEST(PulseReport, ShouldNotCallPrepareHandlerAfterUnregister)
+{
+	int report_ctx = 1;
+	int prepare_ctx = 2;
+	struct pulse conf = { .token = "test-token", .ctx = &report_ctx };
+
+	pulse_init(&conf);
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_set_prepare_handler(prepare_handler, &prepare_ctx));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_set_prepare_handler(NULL, NULL));
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(12));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	CHECK_EQUAL(0u, prepare_handler_calls);
+	CHECK_EQUAL(1u, metrics_prepare_calls);
+	POINTERS_EQUAL(&report_ctx, last_metrics_prepare_ctx);
 }
 
 TEST(PulseReport, ShouldPassUserCtxDirectlyToTransmitCallback)
@@ -810,7 +899,7 @@ TEST(PulseReport, ShouldReturnInProgressWhenAsyncBacklogTransmitInProgress)
 
 	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
 	CHECK_TRUE(pulse_get_report_ctx()->in_flight);
-	CHECK_TRUE(pulse_get_report_ctx()->flight_from_store);
+	CHECK_TRUE(pulse_get_report_ctx()->flight_from_backlog);
 }
 
 TEST(PulseReport, ShouldDeleteBacklogEntryAfterSuccessfulAsyncBacklogTransmit)
@@ -1031,6 +1120,45 @@ TEST(PulseReport, ShouldSaveToBacklogOnCancelWhenMfsAvailableAndNotFromStore)
 
 	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_cancel());
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+}
+
+TEST(PulseReport, ShouldCallPrepareHandlerBeforeMetricsReportPrepareWhenCancelSavesBacklog)
+{
+	int report_ctx = 1;
+	int prepare_ctx = 2;
+	struct pulse conf = {
+		.token = "test-token",
+		.mfs = (struct metricfs *)(uintptr_t)1,
+		.ctx = &report_ctx,
+		.async_transport = true,
+	};
+
+	pulse_init(&conf);
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_set_prepare_handler(prepare_handler, &prepare_ctx));
+
+	mock().expectOneCall("metrics_report_transmit")
+		.withParameter("datasize", (size_t)8)
+		.andReturnValue(-EINPROGRESS);
+
+	metrics_set(PulseMetric, METRICS_VALUE(5));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	prepare_handler_calls = 0u;
+	metrics_prepare_calls = 0u;
+	prepare_order = 0u;
+	prepare_handler_order = 0u;
+	metrics_prepare_order = 0u;
+	last_prepare_handler_ctx = NULL;
+	last_metrics_prepare_ctx = NULL;
+
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_cancel());
+
+	CHECK_EQUAL(1u, prepare_handler_calls);
+	CHECK_EQUAL(1u, metrics_prepare_calls);
+	POINTERS_EQUAL(&prepare_ctx, last_prepare_handler_ctx);
+	POINTERS_EQUAL(&report_ctx, last_metrics_prepare_ctx);
+	CHECK_TRUE(prepare_handler_order < metrics_prepare_order);
 }
 
 TEST(PulseReport, ShouldNotSaveToBacklogOnCancelWhenMfsNotAvailable)

@@ -23,13 +23,15 @@ struct pulse_report_ctx {
 
 	pulse_response_handler_t on_response;
 	void *response_ctx;
+	pulse_prepare_handler_t on_prepare;
+	void *prepare_ctx;
 
 	uint64_t last_report_time;
 
 	uint8_t *flight_buf;
 	size_t flight_len;
 	size_t flight_bufsize;
-	bool flight_from_store;
+	bool flight_from_backlog;
 	bool in_flight;
 
 	bool initialized;

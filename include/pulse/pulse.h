@@ -57,6 +57,27 @@ typedef enum {
 	PULSE_STATUS_IN_PROGRESS	= -12,
 } pulse_status_t;
 
+/**
+ * @brief Callback invoked when a response is received from the ingest server.
+ *
+ * @param[in] data     Response payload bytes.
+ * @param[in] datasize Payload length in bytes.
+ * @param[in] ctx      User context pointer supplied to
+ *                     pulse_set_response_handler().
+ */
+typedef void (*pulse_response_handler_t)(const void *data, size_t datasize,
+		void *ctx);
+
+/**
+ * @brief Callback invoked before metrics collection.
+ *
+ * Use this hook to refresh application-owned state before reporting.
+ *
+ * @param[in] ctx User context pointer supplied to
+ *                pulse_set_prepare_handler().
+ */
+typedef void (*pulse_prepare_handler_t)(void *ctx);
+
 struct pulse {
 	/**
 	 * Pointer to a null-terminated authentication token string.
@@ -136,17 +157,6 @@ pulse_status_t pulse_update_token(const char *token);
 pulse_status_t pulse_update_metricfs(struct metricfs *mfs);
 
 /**
- * @brief Callback invoked when a response is received from the ingest server.
- *
- * @param[in] data     Response payload bytes.
- * @param[in] datasize Payload length in bytes.
- * @param[in] ctx      User context pointer supplied to
- *                     pulse_set_response_handler().
- */
-typedef void (*pulse_response_handler_t)(const void *data, size_t datasize,
-		void *ctx);
-
-/**
  * @brief Register a handler called when the ingest server returns a response.
  *
  * Decouples the SDK transport layer from application-specific response
@@ -162,10 +172,24 @@ pulse_status_t pulse_set_response_handler(pulse_response_handler_t handler,
 		void *ctx);
 
 /**
+ * @brief Register a handler called before metrics_report_prepare().
+ *
+ * Pass NULL to unregister. The supplied @p ctx is forwarded to the handler on
+ * every invocation and is independent of the context stored in struct pulse.
+ *
+ * @param[in] handler Prepare handler, or NULL to disable.
+ * @param[in] ctx     User context pointer forwarded to @p handler.
+ * @return PULSE_STATUS_OK always.
+ */
+pulse_status_t pulse_set_prepare_handler(pulse_prepare_handler_t handler,
+		void *ctx);
+
+/**
  * @brief Report the current pulse status or metrics.
  *
  * Not thread-safe. Must not be called concurrently with pulse_update_token(),
- * pulse_update_metricfs(), pulse_set_response_handler(), or pulse_cancel().
+ * pulse_update_metricfs(), pulse_set_response_handler(),
+ * pulse_set_prepare_handler(), or pulse_cancel().
  *
  * @return Status code indicating success or failure.
  */

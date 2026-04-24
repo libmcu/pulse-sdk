@@ -205,6 +205,15 @@ static bool is_token_valid(const char *token)
 	return token != NULL && strlen(token) <= PULSE_TOKEN_LEN;
 }
 
+static void invoke_prepare_chain(void)
+{
+	if (m.on_prepare != NULL) {
+		m.on_prepare(m.prepare_ctx);
+	}
+
+	metrics_report_prepare(m.user_ctx);
+}
+
 static void free_flight_buf(void)
 {
 #if PULSE_STATIC_PAYLOAD_BUFSIZE == 0u
@@ -213,7 +222,7 @@ static void free_flight_buf(void)
 	m.flight_buf = NULL;
 	m.flight_len = 0u;
 	m.flight_bufsize = 0u;
-	m.flight_from_store = false;
+	m.flight_from_backlog = false;
 }
 
 static void clear_in_flight(void)
@@ -226,7 +235,7 @@ static pulse_status_t commit_flight(void)
 {
 	int err = 0;
 
-	if (m.flight_from_store) {
+	if (m.flight_from_backlog) {
 		err = metricfs_del_first(m.conf.mfs, NULL);
 	} else {
 		metrics_reset();
@@ -247,8 +256,8 @@ static pulse_status_t abort_flight(int transmit_err)
 {
 	bool saved_to_backlog = false;
 
-	if (!m.flight_from_store && m.conf.mfs != NULL) {
-		metrics_report_prepare(m.user_ctx);
+	if (!m.flight_from_backlog && m.conf.mfs != NULL) {
+		invoke_prepare_chain();
 		m.flight_len = metrics_collect(m.flight_buf, m.flight_bufsize);
 		if (m.flight_len > 0u && metricfs_write(m.conf.mfs,
 				m.flight_buf, m.flight_len, NULL) == 0) {
@@ -282,7 +291,7 @@ static pulse_status_t do_transmit(void)
 	return abort_flight(err);
 }
 
-static pulse_status_t collect_from_store(void)
+static pulse_status_t collect_from_backlog(void)
 {
 	int n = metricfs_peek_first(m.conf.mfs,
 			m.flight_buf, m.flight_bufsize, NULL);
@@ -303,15 +312,15 @@ static pulse_status_t collect_from_store(void)
 	}
 
 	m.flight_len = (size_t)n;
-	m.flight_from_store = true;
+	m.flight_from_backlog = true;
 	set_in_flight(true);
 
-	return do_transmit();
+	return PULSE_STATUS_OK;
 }
 
-static pulse_status_t collect_from_metrics(void)
+static pulse_status_t collect_from_live_metrics(void)
 {
-	metrics_report_prepare(m.user_ctx);
+	invoke_prepare_chain();
 
 	m.flight_len = metrics_collect(m.flight_buf, m.flight_bufsize);
 	if (m.flight_len == 0u) {
@@ -325,10 +334,10 @@ static pulse_status_t collect_from_metrics(void)
 		return PULSE_STATUS_OVERFLOW;
 	}
 
-	m.flight_from_store = false;
+	m.flight_from_backlog = false;
 	set_in_flight(true);
 
-	return do_transmit();
+	return PULSE_STATUS_OK;
 }
 
 static pulse_status_t do_collect(void)
@@ -354,10 +363,10 @@ static pulse_status_t do_collect(void)
 	}
 
 	if (has_backlog()) {
-		return collect_from_store();
+		return collect_from_backlog();
 	}
 
-	return collect_from_metrics();
+	return collect_from_live_metrics();
 }
 
 const struct pulse_report_ctx *pulse_get_report_ctx(void)
@@ -392,6 +401,15 @@ pulse_status_t pulse_set_response_handler(pulse_response_handler_t handler,
 	return PULSE_STATUS_OK;
 }
 
+pulse_status_t pulse_set_prepare_handler(pulse_prepare_handler_t handler,
+		void *ctx)
+{
+	m.on_prepare = handler;
+	m.prepare_ctx = ctx;
+
+	return PULSE_STATUS_OK;
+}
+
 pulse_status_t pulse_report(void)
 {
 	if (!is_initialized() || !is_token_valid(m.conf.token)) {
@@ -415,7 +433,12 @@ pulse_status_t pulse_report(void)
 		}
 	}
 
-	return do_collect();
+	const pulse_status_t collect_status = do_collect();
+	if (collect_status != PULSE_STATUS_OK) {
+		return collect_status;
+	}
+
+	return do_transmit();
 }
 
 LIBMCU_WEAK void pulse_transport_cancel(void) {}
@@ -486,6 +509,8 @@ pulse_status_t pulse_init(struct pulse *pulse)
 	m.user_ctx = pulse->ctx;
 	m.on_response = NULL;
 	m.response_ctx = NULL;
+	m.on_prepare = NULL;
+	m.prepare_ctx = NULL;
 	m.periodic_initialized = false;
 	force_reset = pulse->reset_metrics_on_init;
 	set_last_report_time(0u);
