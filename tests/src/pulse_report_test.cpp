@@ -1081,7 +1081,7 @@ TEST(PulseReport, ShouldReportWhenIntervalElapsedAfterRollback)
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
-TEST(PulseReport, ShouldReturnBacklogPendingWhileBacklogRemains)
+TEST(PulseReport, ShouldReturnIoWhenTransmitFailsAndSavesToBacklog)
 {
 	init_pulse_with_mfs();
 
@@ -1090,6 +1090,32 @@ TEST(PulseReport, ShouldReturnBacklogPendingWhileBacklogRemains)
 		.andReturnValue(-EIO);
 
 	metrics_set(PulseMetric, METRICS_VALUE(9));
+	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+}
+
+TEST(PulseReport, ShouldReturnBacklogPendingWhenMoreEntriesRemainAfterSuccessfulTransmit)
+{
+	init_pulse_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EIO);
+
+	metrics_set(PulseMetric, METRICS_VALUE(9));
+	pulse_report();
+
+	metricfs_stub_prime(metricfs_stub_data(), metricfs_stub_size(), 2u);
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+
 	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_report());
 
 	mock().expectOneCall("pulse_transport_transmit")
