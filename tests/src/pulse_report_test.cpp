@@ -610,9 +610,7 @@ TEST(PulseReport, ShouldNotCallPrepareHandlerAfterUnregister)
 
 TEST(PulseReport, ShouldPassReportCtxToTransmitCallback)
 {
-	int user_data = 42;
 	struct pulse conf = make_pulse_conf();
-	conf.ctx = &user_data;
 	pulse_init(&conf);
 
 	mock().expectOneCall("pulse_transport_transmit")
@@ -623,7 +621,6 @@ TEST(PulseReport, ShouldPassReportCtxToTransmitCallback)
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 
 	CHECK_TRUE(last_transmit_ctx != NULL);
-	POINTERS_EQUAL(&user_data, last_transmit_ctx->user_ctx);
 }
 
 TEST(PulseReport, ShouldReturnNonNullForAllStatusStringConversions)
@@ -1486,11 +1483,9 @@ TEST(PulseReport, ShouldSaveToBacklogOnCancelWhenMfsAvailableAndNotFromStore)
 
 TEST(PulseReport, ShouldCallPrepareHandlerBeforeMetricsReportPrepareWhenCancelSavesBacklog)
 {
-	int report_ctx = 1;
 	int prepare_ctx = 2;
 	struct pulse conf = make_pulse_conf();
 	conf.mfs = (struct metricfs *)(uintptr_t)1;
-	conf.ctx = &report_ctx;
 	conf.async_transport = true;
 
 	pulse_init(&conf);

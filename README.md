@@ -108,19 +108,6 @@ add_subdirectory(path/to/pulse-sdk)
 target_link_libraries(your_target PRIVATE pulse-sdk)
 ```
 
-> [!IMPORTANT]
-> When `PULSE_SDK_LIBMCU_ROOT` or `LIBMCU_ROOT` points to an external libmcu root
-> (i.e. not the bundled `external/libmcu`), `pulse_sdk_collect()` does **not**
-> automatically add metrics core sources, platform overrides, or transport.
-> You must add the following sources to your build target manually:
->
-> - `<libmcu>/modules/metrics/src/metrics.c`
-> - `<libmcu>/modules/metrics/src/metrics_overrides.c`
-> - `<libmcu>/modules/common/src/assert.c`
-> - `ports/<platform>/pulse_overrides.c`
-> - `ports/<platform>/pulse_transport_https.c`
-> - `ports/pulse_metricfs_stub.c`
-
 ### Linux
 
 On Linux, `pulse_sdk_collect()` adds:
@@ -162,6 +149,37 @@ When `LIBMCU_ROOT` resolves to `$(PULSE_SDK_ROOT)/external/libmcu`, the Make int
 > the Make integration does **not** automatically add metrics sources,
 > platform overrides, or transport. Add them manually to your build.
 
+## API Reference
+### Metric definition macros
+
+- `METRICS_DEFINE_COUNTER(name)`
+  - Monotonically increasing integer. Use for event counts.
+- `METRICS_DEFINE_GAUGE(name, min, max)`
+  - Bounded numeric value. Specify min and max.
+- `METRICS_DEFINE_PERCENTAGE(name)`
+  - Integer value in the 0–100 range.
+- `METRICS_DEFINE_TIMER(name, unit)`
+  - Time duration. Units: s, ms.
+- `METRICS_DEFINE_STATE(name)`
+  - Discrete state code.
+- `METRICS_DEFINE_BINARY(name)`
+  - Boolean flag: 0 or 1.
+- `METRICS_DEFINE_BYTES(name)`
+  - Byte count.
+- `METRICS_DEFINE(name)`
+  - Raw numeric value with no semantic constraint.
+
+### Metric manipulation functions
+
+- `metrics_set(name, val)`
+  - Set the metric value.
+- `metrics_increase(name)`
+  - Increment a counter by 1.
+- `metrics_increase_by(name, val)`
+  - Increment a counter by a given amount.
+- `metrics_reset(name)`
+  - Reset a metric to its initial value.
+
 ## Notes
 
 Pulse SDK depends on
@@ -186,3 +204,15 @@ Your application must provide required Pulse metadata directly via `struct pulse
 - `token`
 - `serial_number`
 - `software_version`
+
+> [!IMPORTANT]
+> When `PULSE_SDK_LIBMCU_ROOT` or `LIBMCU_ROOT` points to an external libmcu root
+> (i.e. not the bundled `external/libmcu`), `pulse_sdk_collect()` does **not**
+> automatically add metrics core sources, platform overrides, or transport.
+> You must add the following sources to your build target manually:
+>
+> - `<libmcu>/modules/metrics/src/metrics.c`
+> - `<libmcu>/modules/metrics/src/metricfs.c`
+> - `<libmcu>/modules/common/src/assert.c`
+> - `ports/<platform>/pulse_overrides.c`
+> - `ports/<platform>/pulse_transport_https.c`

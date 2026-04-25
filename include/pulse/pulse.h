@@ -99,8 +99,6 @@ struct pulse {
 	const char *software_version; /**< Required software version metadata.
 			Must be non-NULL, non-empty, and null-terminated.
 			The null terminator is not encoded into the payload. */
-	void *ctx; /**< Optional. User context pointer passed through to the
-			transmit callback. */
 	uint32_t transmit_timeout_ms; /**< Optional. Maximum transmit time in
 			milliseconds. Set to 0 to use the platform default. */
 	bool reset_metrics_on_init; /**< When true, resets all metric counters
