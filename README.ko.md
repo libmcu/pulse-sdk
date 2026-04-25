@@ -36,11 +36,12 @@ void example(void)
 ```
 
 > [!NOTE]
-> 인증 토큰은 [Pulse](https://pulse.libmcu.org) 의 product setup에서 생성하시거나,
-> 이미 발급된 토큰을 그대로 사용하시면 됩니다. 준비된 토큰은 `pulse_init()`에 전달하시면 됩니다.
-> `struct pulse`의 `token`, `serial_number`, `software_version`은 필수 항목임.
-> 세 값 모두 `NULL`이 아니고 비어 있지 않은 null-terminated 문자열이어야 함.
-> null terminator 자체는 payload에 인코딩하지 않음.
+> 인증 토큰은 [Pulse](https://pulse.libmcu.org) 의 product setup에서 생성하거나,
+> 이미 발급된 토큰을 그대로 사용하면 됩니다. 준비된 토큰은 `pulse_init()` 또는
+> `pulse_update_token()`으로 설정할 수 있습니다.
+> `struct pulse`의 `token`, `serial_number`, `software_version`은 필수 항목입니다.
+> 세 값 모두 `NULL`이 아니고 비어 있지 않은 null-terminated 문자열이어야 합니다.
+> null terminator 자체는 payload에 인코딩되지 않습니다.
 
 metrics.def 파일 예시:
 
@@ -143,7 +144,7 @@ APP_INCS += $(PULSE_SDK_INCS)
 - `ports/baremetal/pulse_transport_https.c`
 - bundled `libmcu` metrics 관련 필수 소스
 
-## 통합 전 요구 사항
+## 참고
 
 Pulse SDK는 [libmcu](https://github.com/libmcu/libmcu)와
 [cbor](https://github.com/libmcu/cbor)에 의존합니다.
@@ -161,19 +162,8 @@ Make 통합 시 `pulse-sdk.mk`는 아래 순서로 의존성을 해석합니다.
 2. `LIBMCU_ROOT` / `CBOR_ROOT`
 3. `external/libmcu` / `external/cbor`
 
-또한 애플리케이션은 필수 Pulse 메타데이터를 `struct pulse`로 직접 제공해야 함.
+애플리케이션은 필수 Pulse 메타데이터를 `struct pulse`로 직접 제공해야 합니다.
 
 - `token`
 - `serial_number`
 - `software_version`
-
-실제 전송은 `pulse_transport_transmit(const void *data, size_t datasize, const struct pulse_report_ctx *ctx)`를 통해 수행됩니다.
-
-Pulse SDK에 포함된 플랫폼 port는 timestamp 및 lock hook를 제공할 수 있지만, 전송 경로까지 항상 완성해 주지는 않습니다. Linux를 포함한 일반 port에서는 기본 구현이 weak stub이며, 애플리케이션이 override하지 않으면 I/O 오류를 반환합니다.
-
-Endpoint 상수는 `include/pulse/pulse.h`에 정의되어 있습니다.
-
-- `PULSE_INGEST_HOST`: `ingest.libmcu.org`
-- `PULSE_INGEST_PATH`: `/v1`
-- `PULSE_INGEST_URL_HTTPS`: `https://ingest.libmcu.org/v1`
-- `PULSE_INGEST_URL_COAPS`: `coaps://ingest.libmcu.org/v1`

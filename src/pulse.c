@@ -325,7 +325,7 @@ static pulse_status_t abort_flight(int transmit_err)
 
 	clear_in_flight();
 
-	if (saved_to_backlog) {
+	if (saved_to_backlog && transmit_err == -ECANCELED) {
 		return PULSE_STATUS_BACKLOG_PENDING;
 	}
 
@@ -334,6 +334,7 @@ static pulse_status_t abort_flight(int transmit_err)
 
 static pulse_status_t commit_flight(void)
 {
+	const bool was_from_backlog = m.flight_from_backlog;
 	int err = 0;
 
 	if (m.flight_from_backlog) {
@@ -350,7 +351,12 @@ static pulse_status_t commit_flight(void)
 
 	clear_in_flight();
 
-	return (err == 0) ? PULSE_STATUS_OK : map_metrics_report_error(err);
+	if (err != 0) {
+		return map_metrics_report_error(err);
+	}
+
+	return (was_from_backlog && has_backlog())
+		? PULSE_STATUS_BACKLOG_PENDING : PULSE_STATUS_OK;
 }
 
 static pulse_status_t collect_from_backlog(void)

@@ -33,9 +33,11 @@ typedef enum {
 	 * the next scheduled call will proceed normally. */
 	PULSE_STATUS_TOO_SOON		= -7,
 	PULSE_STATUS_EMPTY		= -8,
-	/* The current report succeeded or was skipped, but undelivered
-	 * backlog entries remain in metricfs. Call @ref pulse_report()
-	 * again immediately to drain the backlog. */
+	/* A backlog entry was delivered and more entries remain, or an
+	 * in-progress transfer was cancelled and the snapshot was saved
+	 * to the backlog. Call @ref pulse_report() again to continue
+	 * draining. Transport errors return the matching error code
+	 * instead so the caller can apply appropriate backoff. */
 	PULSE_STATUS_BACKLOG_PENDING	= -9,
 	/* A backlog entry's stored payload exceeds the transmit buffer size
 	 * (e.g. written under a different schema or a larger payload). The

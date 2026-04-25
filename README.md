@@ -37,7 +37,8 @@ void example(void)
 
 > [!NOTE]
 > Create or copy your authentication token from product setup on
-> [Pulse](https://pulse.libmcu.org), then pass that token to `pulse_init()`.
+> [Pulse](https://pulse.libmcu.org). Pass that token to `pulse_init()` or
+> set it later via `pulse_update_token()`.
 > `token`, `serial_number`, and `software_version` are required fields in
 > `struct pulse`. All three must be non-NULL, non-empty, null-terminated
 > strings. The null terminator is not encoded into the payload.
@@ -161,7 +162,7 @@ When `LIBMCU_ROOT` resolves to `$(PULSE_SDK_ROOT)/external/libmcu`, the Make int
 > the Make integration does **not** automatically add metrics sources,
 > platform overrides, or transport. Add them manually to your build.
 
-## Integration requirements
+## Notes
 
 Pulse SDK depends on
 [libmcu](https://github.com/libmcu/libmcu) and
@@ -185,14 +186,3 @@ Your application must provide required Pulse metadata directly via `struct pulse
 - `token`
 - `serial_number`
 - `software_version`
-
-Transmission happens through `pulse_transport_transmit(const void *data, size_t datasize, const struct pulse_report_ctx *ctx)`.
-
-Platform ports included by Pulse SDK may provide timestamp and lock hooks, but the transmit path still needs a working implementation. On Linux and other generic ports, the built-in implementation is a weak stub that returns an I/O error unless your application overrides it.
-
-The endpoint constants are defined in `include/pulse/pulse.h`:
-
-- `PULSE_INGEST_HOST`: `ingest.libmcu.org`
-- `PULSE_INGEST_PATH`: `/v1`
-- `PULSE_INGEST_URL_HTTPS`: `https://ingest.libmcu.org/v1`
-- `PULSE_INGEST_URL_COAPS`: `coaps://ingest.libmcu.org/v1`

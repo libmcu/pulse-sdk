@@ -106,6 +106,15 @@ function(pulse_sdk_collect out_srcs out_public_incs out_private_incs)
 	#   - <libmcu>/modules/common/src/assert.c
 	#   - ports/<platform>/pulse_overrides.c
 	#   - ports/<platform>/pulse_transport_https.c
+	#
+	# When libmcu is an external library (preferred/fallback), the GNU linker will
+	# not extract it from the archive because the weak symbol in libmcu satisfies
+	# the reference before the archive is scanned (archive members are only
+	# extracted for undefined references, not weak-defined ones). To ensure the
+	# strong CBOR encoder is used, callers must also compile
+	# pulse_metrics_cbor_encoder.c directly into the final executable (e.g. via
+	# PORT_SRCS). The duplicate entry in the archive is harmless — it will not be
+	# extracted once the symbol is already defined by the direct-compiled object.
 	if(_PULSE_SDK_LIBMCU_RESOLVED_ROOT_SOURCE STREQUAL "bundled" OR
 			_PULSE_SDK_LIBMCU_RESOLVED_ROOT_SOURCE STREQUAL "fetched")
 		list(APPEND _srcs
