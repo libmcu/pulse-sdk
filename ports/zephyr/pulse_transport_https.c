@@ -149,14 +149,14 @@ static int connect_socket(int32_t timeout_ms)
 	int ret = -EHOSTUNREACH;
 
 	memset(&hints, 0, sizeof(hints));
-	hints.ai_socktype = ZSOCK_SOCK_STREAM;
-	hints.ai_protocol = ZSOCK_IPPROTO_TLS_1_2;
+	hints.ai_socktype = NET_SOCK_STREAM;
+	hints.ai_protocol = NET_IPPROTO_TLS_1_2;
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
-		hints.ai_family = ZSOCK_AF_INET;
+		hints.ai_family = NET_AF_INET;
 	} else if (IS_ENABLED(CONFIG_NET_IPV6)) {
-		hints.ai_family = ZSOCK_AF_INET6;
+		hints.ai_family = NET_AF_INET6;
 	} else {
-		hints.ai_family = ZSOCK_AF_UNSPEC;
+		hints.ai_family = NET_AF_UNSPEC;
 	}
 
 	ret = zsock_getaddrinfo(PULSE_INGEST_HOST, PULSE_HTTPS_PORT,
@@ -167,7 +167,7 @@ static int connect_socket(int32_t timeout_ms)
 
 	for (addr = addresses; addr != NULL; addr = addr->ai_next) {
 		sock = zsock_socket(addr->ai_family, addr->ai_socktype,
-				ZSOCK_IPPROTO_TLS_1_2);
+				NET_IPPROTO_TLS_1_2);
 		if (sock < 0) {
 			ret = -errno;
 			continue;

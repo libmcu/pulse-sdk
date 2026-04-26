@@ -11,16 +11,25 @@
 #include "zephyr/net/tls_credentials.h"
 #include <stddef.h>
 
-#define SOCK_STREAM		1
-#define AF_UNSPEC		0
-#define AF_INET			2
-#define AF_INET6		10
+#define NET_SOCK_STREAM		1
+#define NET_AF_UNSPEC		0
+#define NET_AF_INET		2
+#define NET_AF_INET6		10
 
-#define IPPROTO_TLS_1_2		258
+#define NET_IPPROTO_TLS_1_2	258
 
-#define SOL_SOCKET		1
-#define SO_RCVTIMEO		20
-#define SO_SNDTIMEO		21
+#define ZSOCK_SOL_SOCKET	1
+#define ZSOCK_SO_RCVTIMEO	20
+#define ZSOCK_SO_SNDTIMEO	21
+
+#define SOCK_STREAM		NET_SOCK_STREAM
+#define AF_UNSPEC		NET_AF_UNSPEC
+#define AF_INET			NET_AF_INET
+#define AF_INET6		NET_AF_INET6
+#define IPPROTO_TLS_1_2		NET_IPPROTO_TLS_1_2
+#define SOL_SOCKET		ZSOCK_SOL_SOCKET
+#define SO_RCVTIMEO		ZSOCK_SO_RCVTIMEO
+#define SO_SNDTIMEO		ZSOCK_SO_SNDTIMEO
 
 #define IS_ENABLED(x)		(!!(x))
 #define CONFIG_NET_IPV4		0
