@@ -177,7 +177,7 @@ jobs:
         working-directory: zephyr-workspace
         run: |
           west init -l app --mf west.yml
-          west update zephyr mbedtls
+          west update
           west zephyr-export
           echo "ZEPHYR_BASE=${PWD}/zephyr" >> $GITHUB_ENV
 
