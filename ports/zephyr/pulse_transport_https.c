@@ -97,18 +97,18 @@ static int configure_socket_tls(int sock)
 {
 	int ret;
 #if defined(CONFIG_MBEDTLS_BUILTIN_TRUSTED_CERTS)
-	const int verify = ZSOCK_TLS_PEER_VERIFY_REQUIRED;
+	const int verify = TLS_PEER_VERIFY_REQUIRED;
 #else
-	const int verify = ZSOCK_TLS_PEER_VERIFY_NONE;
+	const int verify = TLS_PEER_VERIFY_NONE;
 #endif
 
-	ret = zsock_setsockopt(sock, ZSOCK_SOL_TLS, ZSOCK_TLS_PEER_VERIFY,
+	ret = zsock_setsockopt(sock, SOL_TLS, TLS_PEER_VERIFY,
 			&verify, sizeof(verify));
 	if (ret < 0) {
 		return -errno;
 	}
 
-	ret = zsock_setsockopt(sock, ZSOCK_SOL_TLS, ZSOCK_TLS_HOSTNAME,
+	ret = zsock_setsockopt(sock, SOL_TLS, TLS_HOSTNAME,
 			PULSE_INGEST_HOST, strlen(PULSE_INGEST_HOST));
 	if (ret < 0) {
 		return -errno;
@@ -124,14 +124,14 @@ static int configure_socket_timeout(int sock, int32_t timeout_ms)
 		.tv_sec = timeout_u32 / 1000u,
 		.tv_usec = (timeout_u32 % 1000u) * 1000u,
 	};
-	int ret = zsock_setsockopt(sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_RCVTIMEO,
+	int ret = zsock_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
 			&tv, sizeof(tv));
 
 	if (ret < 0) {
 		return -errno;
 	}
 
-	ret = zsock_setsockopt(sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_SNDTIMEO,
+	ret = zsock_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
 			&tv, sizeof(tv));
 	if (ret < 0) {
 		return -errno;
@@ -149,14 +149,14 @@ static int connect_socket(int32_t timeout_ms)
 	int ret = -EHOSTUNREACH;
 
 	memset(&hints, 0, sizeof(hints));
-	hints.ai_socktype = NET_SOCK_STREAM;
-	hints.ai_protocol = NET_IPPROTO_TLS_1_2;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_protocol = IPPROTO_TLS_1_2;
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
-		hints.ai_family = NET_AF_INET;
+		hints.ai_family = AF_INET;
 	} else if (IS_ENABLED(CONFIG_NET_IPV6)) {
-		hints.ai_family = NET_AF_INET6;
+		hints.ai_family = AF_INET6;
 	} else {
-		hints.ai_family = NET_AF_UNSPEC;
+		hints.ai_family = AF_UNSPEC;
 	}
 
 	ret = zsock_getaddrinfo(PULSE_INGEST_HOST, PULSE_HTTPS_PORT,
@@ -167,7 +167,7 @@ static int connect_socket(int32_t timeout_ms)
 
 	for (addr = addresses; addr != NULL; addr = addr->ai_next) {
 		sock = zsock_socket(addr->ai_family, addr->ai_socktype,
-				NET_IPPROTO_TLS_1_2);
+				IPPROTO_TLS_1_2);
 		if (sock < 0) {
 			ret = -errno;
 			continue;
