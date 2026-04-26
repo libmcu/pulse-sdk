@@ -15,7 +15,6 @@
 #include <zephyr/net/http/client.h>
 #include <zephyr/net/socket.h>
 #include <zephyr/net/tls_credentials.h>
-#include <zephyr/posix/sys/time.h>
 
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
@@ -38,7 +37,7 @@ typedef struct {
 
 typedef struct {
 	char auth_header[PULSE_HTTPS_AUTH_HEADER_SIZE];
- 	const char *fields[PULSE_HTTPS_MAX_HEADERS];
+	const char *fields[PULSE_HTTPS_MAX_HEADERS];
 } request_headers_t;
 
 typedef struct {
@@ -110,7 +109,7 @@ static int configure_socket_tls(int sock)
 	}
 
 	ret = zsock_setsockopt(sock, SOL_TLS, TLS_HOSTNAME,
-			PULSE_INGEST_HOST, sizeof(PULSE_INGEST_HOST));
+			PULSE_INGEST_HOST, strlen(PULSE_INGEST_HOST));
 	if (ret < 0) {
 		return -errno;
 	}
@@ -145,7 +144,7 @@ static int connect_socket(int32_t timeout_ms)
 	struct zsock_addrinfo *addresses = NULL;
 	struct zsock_addrinfo *addr;
 	int sock = -1;
-	int ret;
+	int ret = -EHOSTUNREACH;
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_socktype = SOCK_STREAM;
@@ -321,6 +320,7 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 	init_request_headers(&m_session.headers);
 	ret = build_auth_header(&m_session.headers, conf);
 	if (ret < 0) {
+		reset_session(&m_session);
 		return ret;
 	}
 
