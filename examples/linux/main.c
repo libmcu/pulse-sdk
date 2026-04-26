@@ -5,20 +5,17 @@
  */
 
 #include <stdio.h>
-#include <unistd.h>
-
 #include "pulse/pulse.h"
 
 #define EXAMPLE_TOKEN			"replace-with-real-token"
 #define EXAMPLE_SERIAL_NUMBER		"SN-TEST01"
 #define EXAMPLE_SOFTWARE_VERSION	"1.0.0-test"
 #define EXAMPLE_METRIC_VALUE		24
-#define EXAMPLE_REPORT_COUNT		3
 
 static void update_metrics(void *ctx)
 {
-	int *example_metric_value = (int *)ctx;
-	metrics_set(PulseMetric, *example_metric_value);
+	(void)ctx;
+	metrics_set(PulseMetric, EXAMPLE_METRIC_VALUE);
 }
 
 static void print_response(const void *data, size_t datasize, void *ctx)
@@ -28,10 +25,26 @@ static void print_response(const void *data, size_t datasize, void *ctx)
 			(int)datasize, (const char *)data);
 }
 
+static void call_this_periodically(void)
+{
+	/* In a real application, you would typically call pulse_report()
+	* periodically, e.g. once per hour, to report updated metrics to Pulse
+	* ingest. For this example, we just call it once from main(). */
+	const pulse_status_t status = pulse_report();
+	if (status != PULSE_STATUS_OK) {
+		fprintf(stderr, "pulse_report failed: %s\n",
+				pulse_stringify_status(status));
+		return;
+	}
+
+	printf("reported PulseMetric=%d to Pulse ingest as %s (%s)\n",
+			EXAMPLE_METRIC_VALUE, EXAMPLE_SERIAL_NUMBER,
+			EXAMPLE_SOFTWARE_VERSION);
+}
+
 int main(void)
 {
-	int example_metric_value = EXAMPLE_METRIC_VALUE;
-	pulse_status_t status = pulse_init(&(struct pulse) {
+	const pulse_status_t status = pulse_init(&(struct pulse) {
 		.token = EXAMPLE_TOKEN,
 		.serial_number = EXAMPLE_SERIAL_NUMBER,
 		.software_version = EXAMPLE_SOFTWARE_VERSION,
@@ -44,27 +57,10 @@ int main(void)
 		return 1;
 	}
 
-	pulse_set_prepare_handler(update_metrics, &example_metric_value);
+	pulse_set_prepare_handler(update_metrics, NULL);
 	pulse_set_response_handler(print_response, NULL);
 
-	for (int i = 0; i < EXAMPLE_REPORT_COUNT; i++) {
-		status = pulse_report();
-		example_metric_value++;
-
-		if (status != PULSE_STATUS_OK) {
-			fprintf(stderr, "pulse_report failed: %s\n",
-					pulse_stringify_status(status));
-			continue;
-		}
-
-		printf("reported PulseMetric=%d to Pulse ingest as %s (%s)\n",
-				example_metric_value, EXAMPLE_SERIAL_NUMBER,
-				EXAMPLE_SOFTWARE_VERSION);
-
-		if (i + 1 < EXAMPLE_REPORT_COUNT) {
-			sleep(60);
-		}
-	}
+	call_this_periodically();
 
 	return 0;
 }
