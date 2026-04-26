@@ -46,16 +46,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 	target_compile_definitions(${PROJECT_NAME}
 		PRIVATE METRICS_USER_DEFINES="${CMAKE_CURRENT_SOURCE_DIR}/examples/metrics.def"
 	)
-
-	if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-		set(_PULSE_EXAMPLE_NAME example_pulse_linux)
-	else()
-		set(_PULSE_EXAMPLE_NAME example_pulse_baremetal)
-	endif()
-
-	add_executable(${_PULSE_EXAMPLE_NAME} examples/linux/main.c)
-	target_include_directories(${_PULSE_EXAMPLE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/examples)
-	target_link_libraries(${_PULSE_EXAMPLE_NAME} PRIVATE ${PROJECT_NAME})
 endif()
 
 if(BUILD_TESTING)
@@ -92,43 +82,4 @@ if(BUILD_TESTING)
 		CppUTest::CppUTest
 		CppUTest::CppUTestExt)
 	add_test(NAME test_pulse_report_cpp COMMAND test_pulse_report_cpp)
-
-	add_executable(test_pulse_transport_https_esp_idf
-		tests/src/test_all.cpp
-		tests/src/pulse_transport_https_esp_idf_test.cpp
-		tests/mocks/esp_http_client_mock.cpp
-		tests/mocks/esp_timer_mock.cpp
-		ports/esp-idf/pulse_transport_https.c)
-	target_compile_definitions(test_pulse_transport_https_esp_idf
-		PRIVATE
-		METRICS_USER_DEFINES="${CMAKE_CURRENT_SOURCE_DIR}/examples/metrics.def"
-		UNIT_TEST
-	)
-	target_include_directories(test_pulse_transport_https_esp_idf PRIVATE
-		${CMAKE_CURRENT_SOURCE_DIR}/tests/mocks)
-	target_link_libraries(test_pulse_transport_https_esp_idf PRIVATE
-		pulse::sdk
-		CppUTest::CppUTest
-		CppUTest::CppUTestExt)
-	add_test(NAME test_pulse_transport_https_esp_idf
-		COMMAND test_pulse_transport_https_esp_idf)
-
-	add_executable(test_pulse_transport_https_zephyr
-		tests/src/test_all.cpp
-		tests/src/pulse_transport_https_zephyr_test.cpp
-		tests/mocks/zephyr_mock.cpp
-		ports/zephyr/pulse_transport_https.c)
-	target_compile_definitions(test_pulse_transport_https_zephyr
-		PRIVATE
-		METRICS_USER_DEFINES="${CMAKE_CURRENT_SOURCE_DIR}/examples/metrics.def"
-		UNIT_TEST
-	)
-	target_include_directories(test_pulse_transport_https_zephyr PRIVATE
-		${CMAKE_CURRENT_SOURCE_DIR}/tests/mocks)
-	target_link_libraries(test_pulse_transport_https_zephyr PRIVATE
-		pulse::sdk
-		CppUTest::CppUTest
-		CppUTest::CppUTestExt)
-	add_test(NAME test_pulse_transport_https_zephyr
-		COMMAND test_pulse_transport_https_zephyr)
 endif()

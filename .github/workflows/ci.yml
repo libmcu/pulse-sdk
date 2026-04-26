@@ -58,7 +58,7 @@ jobs:
       - name: Cache CMake dependencies
         uses: actions/cache@v4
         with:
-          path: build/_deps
+          path: examples/linux/build/_deps
           key: cmake-deps-${{ runner.os }}-${{ hashFiles('pulse-sdk.cmake') }}
           restore-keys: cmake-deps-${{ runner.os }}-
 
@@ -66,13 +66,16 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake
+            build-essential cmake libcurl4-openssl-dev
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: |
+          cmake -B examples/linux/build \
+            -S examples/linux \
+            -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build --parallel $(nproc) --target example_pulse_linux
+        run: cmake --build examples/linux/build --parallel $(nproc)
 
   build-generic-cmake:
     name: Build / Generic CMake

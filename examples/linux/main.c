@@ -4,55 +4,67 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <errno.h>
-#include <stdbool.h>
 #include <stdio.h>
-#include <stdint.h>
-#include <string.h>
-
-#include <libmcu/metrics.h>
+#include <unistd.h>
 
 #include "pulse/pulse.h"
-#include "pulse/pulse_internal.h"
 
-struct loopback_ctx {
-	uint8_t buf[128];
-	size_t len;
-};
+#define EXAMPLE_TOKEN			"replace-with-real-token"
+#define EXAMPLE_SERIAL_NUMBER		"SN-TEST01"
+#define EXAMPLE_SOFTWARE_VERSION	"1.0.0-test"
+#define EXAMPLE_METRIC_VALUE		24
+#define EXAMPLE_REPORT_COUNT		3
 
-static struct loopback_ctx loopback;
+static void update_metrics(void *ctx)
+{
+	int *example_metric_value = (int *)ctx;
+	metrics_set(PulseMetric, *example_metric_value);
+}
 
-int pulse_transport_transmit(const void *data, size_t datasize,
-		const struct pulse_report_ctx *ctx)
+static void print_response(const void *data, size_t datasize, void *ctx)
 {
 	(void)ctx;
-	if (datasize > sizeof(loopback.buf)) {
-		return -EOVERFLOW;
-	}
-
-	memcpy(loopback.buf, data, datasize);
-	loopback.len = datasize;
-
-	return 0;
+	printf("server response (%zu bytes): %.*s\n", datasize,
+			(int)datasize, (const char *)data);
 }
 
 int main(void)
 {
-	memset(&loopback, 0, sizeof(loopback));
+	int example_metric_value = EXAMPLE_METRIC_VALUE;
+	pulse_status_t status = pulse_init(&(struct pulse) {
+		.token = EXAMPLE_TOKEN,
+		.serial_number = EXAMPLE_SERIAL_NUMBER,
+		.software_version = EXAMPLE_SOFTWARE_VERSION,
+		.transmit_timeout_ms = 15000u,
+	});
 
-	struct pulse conf = { .token = "example-token" };
-	if (pulse_init(&conf) != PULSE_STATUS_OK) {
+	if (status != PULSE_STATUS_OK) {
+		fprintf(stderr, "pulse_init failed: %s\n",
+				pulse_stringify_status(status));
 		return 1;
 	}
 
-	metrics_set(PulseMetric, METRICS_VALUE(24));
+	pulse_set_prepare_handler(update_metrics, &example_metric_value);
+	pulse_set_response_handler(print_response, NULL);
 
-	if (pulse_report() != PULSE_STATUS_OK) {
-		return 1;
+	for (int i = 0; i < EXAMPLE_REPORT_COUNT; i++) {
+		status = pulse_report();
+		example_metric_value++;
+
+		if (status != PULSE_STATUS_OK) {
+			fprintf(stderr, "pulse_report failed: %s\n",
+					pulse_stringify_status(status));
+			continue;
+		}
+
+		printf("reported PulseMetric=%d to Pulse ingest as %s (%s)\n",
+				example_metric_value, EXAMPLE_SERIAL_NUMBER,
+				EXAMPLE_SOFTWARE_VERSION);
+
+		if (i + 1 < EXAMPLE_REPORT_COUNT) {
+			sleep(60);
+		}
 	}
-
-	printf("encoded %zu bytes for %s\n", loopback.len,
-			"https://ingest.libmcu.org/v1");
 
 	return 0;
 }
