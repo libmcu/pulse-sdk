@@ -112,4 +112,23 @@ if(BUILD_TESTING)
 		CppUTest::CppUTestExt)
 	add_test(NAME test_pulse_transport_https_esp_idf
 		COMMAND test_pulse_transport_https_esp_idf)
+
+	add_executable(test_pulse_transport_https_zephyr
+		tests/src/test_all.cpp
+		tests/src/pulse_transport_https_zephyr_test.cpp
+		tests/mocks/zephyr_mock.cpp
+		ports/zephyr/pulse_transport_https.c)
+	target_compile_definitions(test_pulse_transport_https_zephyr
+		PRIVATE
+		METRICS_USER_DEFINES="${CMAKE_CURRENT_SOURCE_DIR}/examples/metrics.def"
+		UNIT_TEST
+	)
+	target_include_directories(test_pulse_transport_https_zephyr PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}/tests/mocks)
+	target_link_libraries(test_pulse_transport_https_zephyr PRIVATE
+		pulse::sdk
+		CppUTest::CppUTest
+		CppUTest::CppUTestExt)
+	add_test(NAME test_pulse_transport_https_zephyr
+		COMMAND test_pulse_transport_https_zephyr)
 endif()
