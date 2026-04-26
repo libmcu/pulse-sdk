@@ -5,7 +5,7 @@ manifest:
     # manifest, but this example must also fetch Zephyr itself.
     - name: zephyr
       url: https://github.com/zephyrproject-rtos/zephyr.git
-      revision: main
+      revision: v4.3.0
       import: true
     - name: pulse-sdk
       url: https://github.com/libmcu/pulse-sdk.git
