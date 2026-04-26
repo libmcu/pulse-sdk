@@ -572,7 +572,6 @@ pulse_status_t pulse_init(struct pulse *pulse)
 	}
 
 	m.conf = *pulse;
-	m.user_ctx = pulse->ctx;
 	m.on_response = NULL;
 	m.response_ctx = NULL;
 	m.on_prepare = NULL;

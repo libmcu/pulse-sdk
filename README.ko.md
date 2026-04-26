@@ -144,6 +144,42 @@ APP_INCS += $(PULSE_SDK_INCS)
 - `ports/baremetal/pulse_transport_https.c`
 - bundled `libmcu` metrics 관련 필수 소스
 
+> [!IMPORTANT]
+> 외부 `LIBMCU_ROOT`를 지정한 경우(번들로 제공되는 `external/libmcu`가 아닌 경우),
+> Make 통합은 metrics 소스, 플랫폼 오버라이드, 전송 모듈을 자동으로 추가하지 않습니다.
+> 빌드에 직접 추가해야 합니다.
+
+## 메트릭 API
+### 메트릭 정의 매크로
+
+- `METRICS_DEFINE_COUNTER(name)`
+  - 단조 증가 정수입니다. 이벤트 횟수 기록에 사용합니다.
+- `METRICS_DEFINE_GAUGE(name, min, max)`
+  - 범위가 있는 수치입니다. min과 max를 지정합니다.
+- `METRICS_DEFINE_PERCENTAGE(name)`
+  - 0~100 범위의 정수입니다.
+- `METRICS_DEFINE_TIMER(name, unit)`
+  - 시간 지속값입니다. 단위: s, ms.
+- `METRICS_DEFINE_STATE(name)`
+  - 이산 상태 코드입니다.
+- `METRICS_DEFINE_BINARY(name)`
+  - 이진 플래그로, 0 또는 1입니다.
+- `METRICS_DEFINE_BYTES(name)`
+  - 바이트 수입니다.
+- `METRICS_DEFINE(name)`
+  - 의미론적 제약이 없는 원시 수치입니다.
+
+### 메트릭 설정 API
+
+- `metrics_set(name, val)`
+  - 메트릭 값을 설정합니다.
+- `metrics_increase(name)`
+  - 카운터를 1 증가시킵니다.
+- `metrics_increase_by(name, val)`
+  - 카운터를 지정한 값만큼 증가시킵니다.
+- `metrics_reset(name)`
+  - 메트릭을 초기값으로 초기화합니다.
+
 ## 참고
 
 Pulse SDK는 [libmcu](https://github.com/libmcu/libmcu)와
@@ -154,7 +190,7 @@ CMake 통합 시 의존성 루트는 아래 순서로 해석됩니다.
 1. `PULSE_SDK_LIBMCU_ROOT` / `PULSE_SDK_CBOR_ROOT`
 2. `LIBMCU_ROOT` / `CBOR_ROOT`
 3. `external/libmcu` / `external/cbor`
-4. standalone CMake fetch fallback
+4. CMake fetch 폴백
 
 Make 통합 시 `pulse-sdk.mk`는 아래 순서로 의존성을 해석합니다.
 
@@ -167,3 +203,15 @@ Make 통합 시 `pulse-sdk.mk`는 아래 순서로 의존성을 해석합니다.
 - `token`
 - `serial_number`
 - `software_version`
+
+> [!IMPORTANT]
+> `PULSE_SDK_LIBMCU_ROOT` 또는 `LIBMCU_ROOT`가 외부 libmcu 루트
+> (번들로 제공되는 `external/libmcu`가 아닌 경로)를 가리키는 경우,
+> `pulse_sdk_collect()`는 metrics 코어 소스, 플랫폼 오버라이드, 전송 모듈을
+> 자동으로 추가하지 않습니다. 아래 소스를 빌드 대상에 직접 추가해야 합니다.
+>
+> - `<libmcu>/modules/metrics/src/metrics.c`
+> - `<libmcu>/modules/metrics/src/metricfs.c`
+> - `<libmcu>/modules/common/src/assert.c`
+> - `ports/<platform>/pulse_overrides.c`
+> - `ports/<platform>/pulse_transport_https.c`
