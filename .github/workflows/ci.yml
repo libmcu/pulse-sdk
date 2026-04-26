@@ -185,15 +185,27 @@ jobs:
         working-directory: zephyr-workspace
         run: pip install -r zephyr/scripts/requirements-base.txt
 
+      - name: Cache Zephyr SDK
+        id: cache-zephyr-sdk
+        uses: actions/cache@v3
+        with:
+          path: ~/zephyr-sdk
+          key: zephyr-sdk-{{ env.ZSDK_VERSION }}
+
       - name: Install Zephyr SDK
+        if: steps.cache-zephyr-sdk.outputs.cache-hit != 'true'
         working-directory: zephyr-workspace
         run: |
           ZSDK_VERSION="$(cat zephyr/SDK_VERSION)"
           echo "Using Zephyr SDK version ${ZSDK_VERSION}"
-          west sdk install --version "${ZSDK_VERSION}" --install-base /opt/toolchains
-          echo "ZSDK_VERSION=${ZSDK_VERSION}" >> $GITHUB_ENV
-          echo "ZEPHYR_SDK_INSTALL_DIR=/opt/toolchains/zephyr-sdk-${ZSDK_VERSION}" >> $GITHUB_ENV
-          echo "CMAKE_PREFIX_PATH=/opt/toolchains/zephyr-sdk-${ZSDK_VERSION}" >> $GITHUB_ENV
+          west sdk install --version "${ZSDK_VERSION}" --install-base ~/zephyr-sdk --personal-access-token ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set SDK Environment Variables
+        run: |
+          ZSDK_VERSION="$(cat zephyr-workspace/zephyr/SDK_VERSION)"
+          SDK_PATH="${HOME}/.zephyr-sdk/zephyr-sdk-${ZSDK_VERSION}"
+          echo "ZEPHYR_SDK_INSTALL_DIR=${SDK_PATH}" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=${SDK_PATH}" >> $GITHUB_ENV
 
       - name: Build for native_sim
         working-directory: zephyr-workspace/app
