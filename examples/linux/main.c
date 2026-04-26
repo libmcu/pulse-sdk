@@ -4,55 +4,63 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <errno.h>
-#include <stdbool.h>
 #include <stdio.h>
-#include <stdint.h>
-#include <string.h>
-
-#include <libmcu/metrics.h>
-
 #include "pulse/pulse.h"
-#include "pulse/pulse_internal.h"
 
-struct loopback_ctx {
-	uint8_t buf[128];
-	size_t len;
-};
+#define EXAMPLE_TOKEN			"replace-with-real-token"
+#define EXAMPLE_SERIAL_NUMBER		"SN-TEST01"
+#define EXAMPLE_SOFTWARE_VERSION	"1.0.0-test"
+#define EXAMPLE_METRIC_VALUE		24
 
-static struct loopback_ctx loopback;
-
-int pulse_transport_transmit(const void *data, size_t datasize,
-		const struct pulse_report_ctx *ctx)
+static void update_metrics(void *ctx)
 {
 	(void)ctx;
-	if (datasize > sizeof(loopback.buf)) {
-		return -EOVERFLOW;
+	metrics_set(PulseMetric, EXAMPLE_METRIC_VALUE);
+}
+
+static void print_response(const void *data, size_t datasize, void *ctx)
+{
+	(void)ctx;
+	printf("server response (%zu bytes): %.*s\n", datasize,
+			(int)datasize, (const char *)data);
+}
+
+static void call_this_periodically(void)
+{
+	/* In a real application, you would typically call pulse_report()
+	* periodically, e.g. once per hour, to report updated metrics to Pulse
+	* ingest. For this example, we just call it once from main(). */
+	const pulse_status_t status = pulse_report();
+	if (status != PULSE_STATUS_OK) {
+		fprintf(stderr, "pulse_report failed: %s\n",
+				pulse_stringify_status(status));
+		return;
 	}
 
-	memcpy(loopback.buf, data, datasize);
-	loopback.len = datasize;
-
-	return 0;
+	printf("reported PulseMetric=%d to Pulse ingest as %s (%s)\n",
+			EXAMPLE_METRIC_VALUE, EXAMPLE_SERIAL_NUMBER,
+			EXAMPLE_SOFTWARE_VERSION);
 }
 
 int main(void)
 {
-	memset(&loopback, 0, sizeof(loopback));
+	const pulse_status_t status = pulse_init(&(struct pulse) {
+		.token = EXAMPLE_TOKEN,
+		.serial_number = EXAMPLE_SERIAL_NUMBER,
+		.software_version = EXAMPLE_SOFTWARE_VERSION,
+		.transmit_timeout_ms = 15000u,
+	});
 
-	struct pulse conf = { .token = "example-token" };
-	if (pulse_init(&conf) != PULSE_STATUS_OK) {
+	if (status != PULSE_STATUS_OK) {
+		fprintf(stderr, "pulse_init failed: %s\n",
+				pulse_stringify_status(status));
 		return 1;
 	}
 
-	metrics_set(PulseMetric, METRICS_VALUE(24));
+	pulse_set_prepare_handler(update_metrics, NULL);
+	pulse_set_response_handler(print_response, NULL);
 
-	if (pulse_report() != PULSE_STATUS_OK) {
-		return 1;
-	}
-
-	printf("encoded %zu bytes for %s\n", loopback.len,
-			"https://ingest.libmcu.org/v1");
+	call_this_periodically();
 
 	return 0;
 }

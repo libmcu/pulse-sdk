@@ -27,7 +27,8 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake g++ autoconf automake libtool
+            build-essential cmake g++ autoconf automake libtool \
+            libcurl4-openssl-dev
 
       - name: Install CppUTest
         run: make -C tests install
@@ -58,7 +59,7 @@ jobs:
       - name: Cache CMake dependencies
         uses: actions/cache@v4
         with:
-          path: build/_deps
+          path: examples/linux/build/_deps
           key: cmake-deps-${{ runner.os }}-${{ hashFiles('pulse-sdk.cmake') }}
           restore-keys: cmake-deps-${{ runner.os }}-
 
@@ -66,13 +67,16 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake
+            build-essential cmake libcurl4-openssl-dev
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: |
+          cmake -B examples/linux/build \
+            -S examples/linux \
+            -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build --parallel $(nproc) --target example_pulse_linux
+        run: cmake --build examples/linux/build --parallel $(nproc)
 
   build-generic-cmake:
     name: Build / Generic CMake
@@ -93,7 +97,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake
+            build-essential cmake libcurl4-openssl-dev
 
       - name: Configure
         run: |
@@ -179,6 +183,7 @@ jobs:
           west init -l app --mf west.yml
           west update
           west zephyr-export
+          echo "ZSDK_VERSION=$(cat zephyr/SDK_VERSION)" >> $GITHUB_ENV
           echo "ZEPHYR_BASE=${PWD}/zephyr" >> $GITHUB_ENV
 
       - name: Install Zephyr Python dependencies
@@ -190,7 +195,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/zephyr-sdk
-          key: zephyr-sdk-{{ env.ZSDK_VERSION }}
+          key: zephyr-sdk-${{ env.ZSDK_VERSION }}
 
       - name: Install Zephyr SDK
         if: steps.cache-zephyr-sdk.outputs.cache-hit != 'true'
@@ -202,9 +207,9 @@ jobs:
 
       - name: Set SDK Environment Variables
         run: |
-          ZSDK_VERSION="$(cat zephyr-workspace/zephyr/SDK_VERSION)"
-          SDK_PATH="${HOME}/.zephyr-sdk/zephyr-sdk-${ZSDK_VERSION}"
-          echo "ZEPHYR_SDK_INSTALL_DIR=${SDK_PATH}" >> $GITHUB_ENV
+          SDK_ROOT="${HOME}/zephyr-sdk"
+          SDK_PATH="${SDK_ROOT}/zephyr-sdk-${ZSDK_VERSION}"
+          echo "ZEPHYR_SDK_INSTALL_DIR=${SDK_ROOT}" >> $GITHUB_ENV
           echo "CMAKE_PREFIX_PATH=${SDK_PATH}" >> $GITHUB_ENV
 
       - name: Build for native_sim
