@@ -6,6 +6,31 @@ menuconfig PULSE_SDK
 	help
 	  Pulse SDK module support.
 
+choice PULSE_SDK_TRANSPORT
+	prompt "Transport protocol"
+	depends on PULSE_SDK
+	default PULSE_SDK_TRANSPORT_COAPS
+	help
+	  Select the transport used to send metrics to the ingest server.
+
+config PULSE_SDK_TRANSPORT_HTTPS
+	bool "HTTPS"
+	help
+	  Send metrics over HTTPS (TLS over TCP).
+
+config PULSE_SDK_TRANSPORT_COAPS
+	bool "CoAPS (CoAP over DTLS PSK)"
+	select MBEDTLS
+	select NET_SOCKETS_ENABLE_DTLS
+	select MBEDTLS_KEY_EXCHANGE_PSK_ENABLED
+	help
+	  Send metrics over CoAP with DTLS PSK authentication.
+	  The authentication token supplied to pulse_init() is used as the PSK.
+	  Requires CONFIG_MBEDTLS_CIPHER_GCM_ENABLED or
+	  CONFIG_MBEDTLS_CIPHER_CCM_ENABLED for cipher suite negotiation.
+
+endchoice
+
 config PULSE_SDK_METRICS_USER_DEFINES
 	string "User metrics definition file path"
 	depends on PULSE_SDK

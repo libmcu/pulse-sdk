@@ -52,6 +52,26 @@ METRICS_DEFINE(SensorValue)
 
 ## Platform integration
 
+### Selecting HTTPS or CoAPS
+
+Pulse SDK supports two transports:
+
+- `coaps` — default. Uses CoAP over DTLS PSK.
+- `https` — uses HTTPS over TLS.
+
+When `coaps` is selected, the token passed to `pulse_init()` is reused as the
+DTLS PSK, and the SDK derives the DTLS PSK identity internally.
+
+Platform-specific selection methods:
+
+- **Zephyr**: choose `CONFIG_PULSE_SDK_TRANSPORT_COAPS=y` (default) or
+  `CONFIG_PULSE_SDK_TRANSPORT_HTTPS=y` in `prj.conf`.
+- **ESP-IDF**: choose the transport in `menuconfig`.
+- **Generic CMake / Linux**: set `PULSE_SDK_TRANSPORT` before adding the SDK
+  subdirectory.
+- **Baremetal Make**: the bundled Make integration auto-adds the HTTPS
+  transport only. To use CoAPS, add the CoAPS transport source manually.
+
 ### Zephyr
 
 Add as a [west module](https://docs.zephyrproject.org/latest/develop/modules.html)
@@ -70,6 +90,8 @@ Enable the module in `prj.conf`:
 
 ```conf
 CONFIG_PULSE_SDK=y
+CONFIG_PULSE_SDK_TRANSPORT_COAPS=y
+#CONFIG_PULSE_SDK_TRANSPORT_HTTPS=y
 #CONFIG_PULSE_SDK_METRICS_USER_DEFINES=/path/to/metrics.def
 ```
 
@@ -86,6 +108,17 @@ cd components
 git submodule add https://github.com/libmcu/pulse-sdk.git pulse-sdk
 ```
 
+Select the transport in `menuconfig`:
+
+```text
+Component config  --->
+  Pulse SDK  --->
+    (X) CoAPS (CoAP over DTLS PSK)
+    ( ) HTTPS
+```
+
+CoAPS is the default.
+
 > [!NOTE]
 > The metric definition file must be placed at `main/metrics.def`.
 
@@ -94,6 +127,9 @@ git submodule add https://github.com/libmcu/pulse-sdk.git pulse-sdk
 Add Pulse SDK as a subdirectory and link it to your target.
 
 ```cmake
+set(PULSE_SDK_TRANSPORT coaps CACHE STRING "") # default
+# set(PULSE_SDK_TRANSPORT https CACHE STRING "")
+
 add_subdirectory(path/to/pulse-sdk)
 target_link_libraries(your_target PRIVATE pulse-sdk)
 ```
@@ -113,11 +149,14 @@ target_link_libraries(your_target PRIVATE pulse-sdk)
 On Linux, `pulse_sdk_collect()` adds:
 
 - `ports/linux/pulse_overrides.c`
-- `ports/linux/pulse_transport_https.c`
+- `ports/linux/pulse_transport_<transport>.c`
 
 Basic integration is the same as generic CMake:
 
 ```cmake
+set(PULSE_SDK_TRANSPORT coaps CACHE STRING "") # default
+# set(PULSE_SDK_TRANSPORT https CACHE STRING "")
+
 add_subdirectory(path/to/pulse-sdk)
 add_executable(app main.c)
 target_link_libraries(app PRIVATE pulse-sdk)
@@ -143,6 +182,10 @@ When `LIBMCU_ROOT` resolves to `$(PULSE_SDK_ROOT)/external/libmcu`, the Make int
 - `ports/baremetal/pulse_overrides.c`
 - `ports/baremetal/pulse_transport_https.c`
 - required bundled `libmcu` metrics sources
+
+To switch the baremetal Make integration to CoAPS, remove
+`ports/baremetal/pulse_transport_https.c` from your build and add
+`ports/baremetal/pulse_transport_coaps.c` instead.
 
 > [!IMPORTANT]
 > When an external `LIBMCU_ROOT` is set (not the bundled `external/libmcu`),
@@ -215,4 +258,4 @@ Your application must provide required Pulse metadata directly via `struct pulse
 > - `<libmcu>/modules/metrics/src/metricfs.c`
 > - `<libmcu>/modules/common/src/assert.c`
 > - `ports/<platform>/pulse_overrides.c`
-> - `ports/<platform>/pulse_transport_https.c`
+> - `ports/<platform>/pulse_transport_<transport>.c`

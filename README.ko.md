@@ -50,7 +50,27 @@ METRICS_DEFINE_COUNTER(RunCount)
 METRICS_DEFINE(SensorValue)
 ```
 
-## 플랫폼별 통합 방법
+## 플랫폼별 연동 방법
+
+### HTTPS / CoAPS 선택 방법
+
+Pulse SDK는 두 가지 transport를 지원합니다.
+
+- `coaps` — 기본값. CoAP over DTLS PSK 사용
+- `https` — HTTPS over TLS 사용
+
+`coaps`를 선택하면 `pulse_init()`에 전달한 token을 DTLS PSK로 재사용하고,
+DTLS PSK identity는 SDK가 내부에서 계산합니다.
+
+플랫폼별 선택 방법은 아래와 같습니다:
+
+- **Zephyr**: `prj.conf`에서 `CONFIG_PULSE_SDK_TRANSPORT_COAPS=y`(기본값) 또는
+  `CONFIG_PULSE_SDK_TRANSPORT_HTTPS=y` 선택하면 됩니다.
+- **ESP-IDF**: `menuconfig`에서 transport 선택하면 됩니다.
+- **일반 CMake / Linux**: SDK를 `add_subdirectory()` 하기 전에
+  `PULSE_SDK_TRANSPORT` 설정하면 됩니다.
+- **Baremetal Make**: 번들 Make 통합은 HTTPS transport만 자동 추가합니다.
+  CoAPS를 사용하려면 transport 소스를 수동으로 바꿔 넣어야 합니다.
 
 ### Zephyr
 
@@ -70,6 +90,8 @@ manifest:
 
 ```conf
 CONFIG_PULSE_SDK=y
+CONFIG_PULSE_SDK_TRANSPORT_COAPS=y
+#CONFIG_PULSE_SDK_TRANSPORT_HTTPS=y
 #CONFIG_PULSE_SDK_METRICS_USER_DEFINES=/path/to/metrics.def
 ```
 
@@ -86,6 +108,17 @@ cd components
 git submodule add https://github.com/libmcu/pulse-sdk.git pulse-sdk
 ```
 
+transport는 `menuconfig`에서 선택하면 됩니다.
+
+```text
+Component config  --->
+  Pulse SDK  --->
+    (X) CoAPS (CoAP over DTLS PSK)
+    ( ) HTTPS
+```
+
+기본값은 CoAPS입니다.
+
 > [!NOTE]
 > 메트릭 정의 파일 경로는 `main/metrics.def` 입니다.
 
@@ -94,6 +127,9 @@ git submodule add https://github.com/libmcu/pulse-sdk.git pulse-sdk
 Pulse SDK를 subdirectory로 추가하고 대상에 링크하시면 됩니다.
 
 ```cmake
+set(PULSE_SDK_TRANSPORT coaps CACHE STRING "") # 기본값
+# set(PULSE_SDK_TRANSPORT https CACHE STRING "")
+
 add_subdirectory(path/to/pulse-sdk)
 target_link_libraries(your_target PRIVATE pulse-sdk)
 ```
@@ -113,11 +149,14 @@ target_link_libraries(your_target PRIVATE pulse-sdk)
 Linux에서는 `pulse_sdk_collect()`가 아래 파일을 추가합니다.
 
 - `ports/linux/pulse_overrides.c`
-- `ports/linux/pulse_transport_https.c`
+- `ports/linux/pulse_transport_<transport>.c`
 
 기본 통합 방법은 일반 CMake와 동일합니다.
 
 ```cmake
+set(PULSE_SDK_TRANSPORT coaps CACHE STRING "") # 기본값
+# set(PULSE_SDK_TRANSPORT https CACHE STRING "")
+
 add_subdirectory(path/to/pulse-sdk)
 add_executable(app main.c)
 target_link_libraries(app PRIVATE pulse-sdk)
@@ -143,6 +182,10 @@ APP_INCS += $(PULSE_SDK_INCS)
 - `ports/baremetal/pulse_overrides.c`
 - `ports/baremetal/pulse_transport_https.c`
 - bundled `libmcu` metrics 관련 필수 소스
+
+Baremetal Make 통합을 CoAPS로 바꾸려면,
+`ports/baremetal/pulse_transport_https.c` 대신
+`ports/baremetal/pulse_transport_coaps.c`를 빌드에 직접 추가하면 됩니다.
 
 > [!IMPORTANT]
 > 외부 `LIBMCU_ROOT`를 지정한 경우(번들로 제공되는 `external/libmcu`가 아닌 경우),
@@ -214,4 +257,4 @@ Make 통합 시 `pulse-sdk.mk`는 아래 순서로 의존성을 해석합니다.
 > - `<libmcu>/modules/metrics/src/metricfs.c`
 > - `<libmcu>/modules/common/src/assert.c`
 > - `ports/<platform>/pulse_overrides.c`
-> - `ports/<platform>/pulse_transport_https.c`
+> - `ports/<platform>/pulse_transport_<transport>.c`

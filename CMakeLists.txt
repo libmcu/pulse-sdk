@@ -7,6 +7,12 @@ endif()
 include(${CMAKE_CURRENT_LIST_DIR}/pulse-sdk.cmake)
 
 if(COMMAND idf_component_register)
+	if(CONFIG_PULSE_SDK_TRANSPORT_HTTPS)
+		set(PULSE_SDK_TRANSPORT "https" CACHE STRING "" FORCE)
+	else()
+		set(PULSE_SDK_TRANSPORT "coaps" CACHE STRING "" FORCE)
+	endif()
+
 	pulse_sdk_collect(PULSE_SDK_SRCS PULSE_SDK_PUBLIC_INCS PULSE_SDK_PRIVATE_INCS PULSE_SDK_PUBLIC_DEFS PULSE_SDK_PUBLIC_LINKS)
 
 	idf_component_register(
