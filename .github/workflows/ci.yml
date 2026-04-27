@@ -167,11 +167,11 @@ jobs:
 
       - name: Configure transport (https)
         if: matrix.transport == 'https'
-        run: echo "CONFIG_PULSE_SDK_TRANSPORT_HTTPS=y" > sdkconfig.defaults
+        run: echo "CONFIG_PULSE_SDK_TRANSPORT_HTTPS=y" >> sdkconfig.defaults
 
       - name: Configure transport (coaps)
         if: matrix.transport == 'coaps'
-        run: echo "CONFIG_PULSE_SDK_TRANSPORT_COAPS=y" > sdkconfig.defaults
+        run: echo "CONFIG_PULSE_SDK_TRANSPORT_COAPS=y" >> sdkconfig.defaults
 
       - name: Build with ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
