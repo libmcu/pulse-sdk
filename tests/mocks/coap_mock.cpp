@@ -8,6 +8,7 @@
 
 extern "C" {
 #include "coap3/coap.h"
+#include "openssl/ssl.h"
 }
 
 struct coap_context_t {
@@ -421,4 +422,14 @@ extern "C" int coap_get_data_large(const coap_pdu_t *pdu, size_t *len,
 extern "C" void coap_delete_pdu(coap_pdu_t *pdu)
 {
 	(void)pdu;
+}
+
+extern "C" void *coap_session_get_tls(const coap_session_t *session,
+		coap_tls_library_t *tls_lib)
+{
+	(void)session;
+	if (tls_lib != NULL) {
+		*tls_lib = COAP_TLS_LIBRARY_OPENSSL;
+	}
+	return openssl_ssl_mock_get_ssl();
 }

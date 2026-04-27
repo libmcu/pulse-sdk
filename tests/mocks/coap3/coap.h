@@ -70,6 +70,17 @@ typedef struct coap_context_t coap_context_t;
 typedef struct coap_session_t coap_session_t;
 typedef struct coap_pdu_t coap_pdu_t;
 
+typedef enum {
+	COAP_TLS_LIBRARY_NONE = 0,
+	COAP_TLS_LIBRARY_OPENSSL,
+	COAP_TLS_LIBRARY_GNUTLS,
+	COAP_TLS_LIBRARY_MBEDTLS,
+	COAP_TLS_LIBRARY_TINYDTLS,
+} coap_tls_library_t;
+
+void *coap_session_get_tls(const coap_session_t *session,
+		coap_tls_library_t *tls_lib);
+
 typedef struct {
 	coap_bin_const_t identity;
 	coap_bin_const_t key;

@@ -8,7 +8,19 @@
 
 extern "C" {
 #include "openssl/sha.h"
+#include "openssl/ssl.h"
 }
+
+struct ssl_ctx_st {
+	int reserved;
+};
+
+struct ssl_st {
+	int reserved;
+};
+
+static ssl_ctx_st g_default_ssl_ctx;
+static ssl_st g_default_ssl;
 
 static struct {
 	int sha256_enabled;
@@ -16,6 +28,12 @@ static struct {
 	unsigned char input[256];
 	size_t input_len;
 } g_state;
+
+static struct {
+	int cipher_list_result;
+	char last_cipher_list[256];
+	int last_security_level;
+} g_ssl_state;
 
 extern "C" void openssl_mock_reset(void)
 {
@@ -26,6 +44,9 @@ extern "C" void openssl_mock_reset(void)
 	for (i = 0u; i < SHA256_DIGEST_LENGTH; i++) {
 		g_state.digest[i] = (unsigned char)i;
 	}
+
+	memset(&g_ssl_state, 0, sizeof(g_ssl_state));
+	g_ssl_state.cipher_list_result = 1;
 }
 
 extern "C" void openssl_mock_set_sha256_result(int enabled)
@@ -71,4 +92,62 @@ extern "C" unsigned char *SHA256(const unsigned char *data, size_t len,
 	memcpy(digest, g_state.digest, SHA256_DIGEST_LENGTH);
 
 	return digest;
+}
+
+extern "C" void openssl_ssl_mock_reset(void)
+{
+	memset(&g_ssl_state, 0, sizeof(g_ssl_state));
+	g_ssl_state.cipher_list_result = 1;
+}
+
+extern "C" void openssl_ssl_mock_set_cipher_list_result(int result)
+{
+	g_ssl_state.cipher_list_result = result;
+}
+
+extern "C" SSL *openssl_ssl_mock_get_ssl(void)
+{
+	return &g_default_ssl;
+}
+
+extern "C" SSL_CTX *openssl_ssl_mock_get_ssl_ctx(void)
+{
+	return &g_default_ssl_ctx;
+}
+
+extern "C" const char *openssl_ssl_mock_last_cipher_list(void)
+{
+	return g_ssl_state.last_cipher_list;
+}
+
+extern "C" int openssl_ssl_mock_last_security_level(void)
+{
+	return g_ssl_state.last_security_level;
+}
+
+extern "C" SSL_CTX *SSL_get_SSL_CTX(const SSL *ssl)
+{
+	(void)ssl;
+	return &g_default_ssl_ctx;
+}
+
+extern "C" int SSL_CTX_set_security_level(SSL_CTX *ctx, int level)
+{
+	(void)ctx;
+	g_ssl_state.last_security_level = level;
+	return 1;
+}
+
+extern "C" int SSL_CTX_set_cipher_list(SSL_CTX *ctx, const char *str)
+{
+	(void)ctx;
+	if (str != NULL) {
+		size_t len = strlen(str);
+		if (len >= sizeof(g_ssl_state.last_cipher_list)) {
+			len = sizeof(g_ssl_state.last_cipher_list) - 1u;
+		}
+		memcpy(g_ssl_state.last_cipher_list, str, len);
+		g_ssl_state.last_cipher_list[len] = '\0';
+	}
+	return g_ssl_state.cipher_list_result;
 }

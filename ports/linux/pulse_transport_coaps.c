@@ -293,18 +293,11 @@ static int map_coap_nack_reason(coap_nack_reason_t reason)
 
 static coap_request_state_t *get_request_state(coap_session_t *session)
 {
-	coap_context_t *coap_ctx;
-
 	if (session == NULL) {
 		return NULL;
 	}
 
-	coap_ctx = coap_session_get_context(session);
-	if (coap_ctx == NULL) {
-		return NULL;
-	}
-
-	return (coap_request_state_t *)coap_context_get_app_data(coap_ctx);
+	return (coap_request_state_t *)coap_session_get_app_data(session);
 }
 
 static coap_response_t handle_coap_response(coap_session_t *session,
@@ -361,7 +354,7 @@ static int coap_send_recv_compat(coap_context_t *coap_ctx,
 	memset(&state, 0, sizeof(state));
 	state.response = response;
 
-	coap_context_set_app_data(coap_ctx, &state);
+	coap_session_set_app_data(session, &state);
 	coap_register_response_handler(coap_ctx, handle_coap_response);
 	coap_register_nack_handler(coap_ctx, handle_coap_nack);
 
@@ -369,7 +362,7 @@ static int coap_send_recv_compat(coap_context_t *coap_ctx,
 	if (state.request_mid == COAP_INVALID_MID) {
 		coap_register_response_handler(coap_ctx, NULL);
 		coap_register_nack_handler(coap_ctx, NULL);
-		coap_context_set_app_data(coap_ctx, NULL);
+		coap_session_set_app_data(session, NULL);
 		return -EIO;
 	}
 
@@ -396,7 +389,7 @@ static int coap_send_recv_compat(coap_context_t *coap_ctx,
 
 	coap_register_response_handler(coap_ctx, NULL);
 	coap_register_nack_handler(coap_ctx, NULL);
-	coap_context_set_app_data(coap_ctx, NULL);
+	coap_session_set_app_data(session, NULL);
 
 	if (!state.completed) {
 		return -ETIMEDOUT;
