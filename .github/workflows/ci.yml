@@ -78,7 +78,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcoap3-dev libssl-dev
+            build-essential cmake pkg-config libcoap3-dev libssl-dev
 
       - name: Configure
         run: |

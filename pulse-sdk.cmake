@@ -81,7 +81,7 @@ function(_pulse_sdk_resolve_transport_source platform_dir out_var)
 	set(${out_var} ${_transport_path} PARENT_SCOPE)
 endfunction()
 
-function(pulse_sdk_collect out_srcs out_public_incs out_private_incs out_public_defs out_public_links)
+function(pulse_sdk_collect out_srcs out_public_incs out_private_incs)
 	set(_srcs
 		${PULSE_SDK_ROOT}/src/pulse.c
 		${PULSE_SDK_ROOT}/src/pulse_codec.c
@@ -232,6 +232,10 @@ function(pulse_sdk_collect out_srcs out_public_incs out_private_incs out_public_
 	set(${out_srcs} ${_srcs} PARENT_SCOPE)
 	set(${out_public_incs} ${_public_incs} PARENT_SCOPE)
 	set(${out_private_incs} ${_private_incs} PARENT_SCOPE)
-	set(${out_public_defs} ${_public_defs} PARENT_SCOPE)
-	set(${out_public_links} ${_public_links} PARENT_SCOPE)
+	if(ARGC GREATER 3 AND ARGV3)
+		set(${ARGV3} ${_public_defs} PARENT_SCOPE)
+	endif()
+	if(ARGC GREATER 4 AND ARGV4)
+		set(${ARGV4} ${_public_links} PARENT_SCOPE)
+	endif()
 endfunction()

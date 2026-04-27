@@ -129,6 +129,8 @@ coap_session_t *coap_new_client_session_psk2(coap_context_t *ctx,
 		coap_proto_t proto, coap_dtls_cpsk_t *setup_data);
 coap_context_t *coap_session_get_context(const coap_session_t *session);
 void coap_session_release(coap_session_t *session);
+void coap_session_set_app_data(coap_session_t *session, void *data);
+void *coap_session_get_app_data(const coap_session_t *session);
 coap_pdu_t *coap_new_pdu(coap_pdu_type_t type, coap_pdu_code_t code,
 		coap_session_t *session);
 int coap_add_option(coap_pdu_t *pdu, uint16_t number, size_t length,

@@ -32,6 +32,7 @@ static coap_addr_info_t g_default_addr_info;
 static struct {
 	coap_context_t *context_result;
 	void *context_app_data;
+	void *session_app_data;
 	coap_response_handler_t response_handler;
 	coap_nack_handler_t nack_handler;
 	int resolve_enabled;
@@ -75,6 +76,7 @@ extern "C" void coap_mock_reset(void)
 	memset(&g_state, 0, sizeof(g_state));
 	g_state.context_result = &g_default_context;
 	g_state.context_app_data = NULL;
+	g_state.session_app_data = NULL;
 	g_state.response_handler = NULL;
 	g_state.nack_handler = NULL;
 	g_state.resolve_enabled = 1;
@@ -211,6 +213,18 @@ extern "C" coap_addr_info_t *coap_resolve_address_info(
 extern "C" void coap_free_address_info(coap_addr_info_t *info_list)
 {
 	(void)info_list;
+}
+
+extern "C" void coap_session_set_app_data(coap_session_t *session, void *data)
+{
+	(void)session;
+	g_state.session_app_data = data;
+}
+
+extern "C" void *coap_session_get_app_data(const coap_session_t *session)
+{
+	(void)session;
+	return g_state.session_app_data;
 }
 
 extern "C" void coap_context_set_app_data(coap_context_t *context, void *data)
