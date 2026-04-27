@@ -2,6 +2,10 @@ include_guard(GLOBAL)
 
 include(FetchContent)
 
+set(PULSE_SDK_TRANSPORT "coaps" CACHE STRING
+	"SDK transport to build (https or coaps)")
+set_property(CACHE PULSE_SDK_TRANSPORT PROPERTY STRINGS https coaps)
+
 set(PULSE_SDK_ROOT ${CMAKE_CURRENT_LIST_DIR})
 
 if(NOT DEFINED PULSE_SDK_FETCH_DEPS)
@@ -54,7 +58,30 @@ function(_pulse_sdk_resolve_root preferred_var fallback_var local_dir repo_url r
 	set(${out_var}_SOURCE ${_source} PARENT_SCOPE)
 endfunction()
 
-function(pulse_sdk_collect out_srcs out_public_incs out_private_incs)
+function(_pulse_sdk_get_transport_name out_var)
+	string(TOLOWER "${PULSE_SDK_TRANSPORT}" _transport)
+
+	if(NOT _transport STREQUAL "https" AND NOT _transport STREQUAL "coaps")
+		message(FATAL_ERROR
+			"Unsupported PULSE_SDK_TRANSPORT='${PULSE_SDK_TRANSPORT}'. Use https or coaps.")
+	endif()
+
+	set(${out_var} ${_transport} PARENT_SCOPE)
+endfunction()
+
+function(_pulse_sdk_resolve_transport_source platform_dir out_var)
+	_pulse_sdk_get_transport_name(_transport)
+	set(_transport_path "${platform_dir}/pulse_transport_${_transport}.c")
+
+	if(NOT EXISTS "${_transport_path}")
+		message(FATAL_ERROR
+			"Transport '${_transport}' is not available for platform path '${platform_dir}'.")
+	endif()
+
+	set(${out_var} ${_transport_path} PARENT_SCOPE)
+endfunction()
+
+function(pulse_sdk_collect out_srcs out_public_incs out_private_incs out_public_defs out_public_links)
 	set(_srcs
 		${PULSE_SDK_ROOT}/src/pulse.c
 		${PULSE_SDK_ROOT}/src/pulse_codec.c
@@ -64,6 +91,8 @@ function(pulse_sdk_collect out_srcs out_public_incs out_private_incs)
 		${PULSE_SDK_ROOT}/include
 	)
 	set(_private_incs)
+	set(_public_defs)
+	set(_public_links)
 
 	_pulse_sdk_resolve_root(PULSE_SDK_LIBMCU_ROOT LIBMCU_ROOT
 		external/libmcu https://github.com/libmcu/libmcu.git main
@@ -96,6 +125,12 @@ function(pulse_sdk_collect out_srcs out_public_incs out_private_incs)
 		${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/common/include
 		${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/metrics/include
 		${CBOR_INCS})
+	_pulse_sdk_get_transport_name(_transport)
+	if(_transport STREQUAL "coaps")
+		list(APPEND _public_defs PULSE_SDK_TRANSPORT_COAPS=1)
+	else()
+		list(APPEND _public_defs PULSE_SDK_TRANSPORT_COAPS=0)
+	endif()
 
 	# NOTE: metrics core sources, platform overrides, and transport are only
 	# collected automatically when libmcu is resolved as bundled or fetched.
@@ -105,7 +140,7 @@ function(pulse_sdk_collect out_srcs out_public_incs out_private_incs)
 	#   - <libmcu>/modules/metrics/src/metricfs.c
 	#   - <libmcu>/modules/common/src/assert.c
 	#   - ports/<platform>/pulse_overrides.c
-	#   - ports/<platform>/pulse_transport_https.c
+	#   - ports/<platform>/pulse_transport_<transport>.c
 	#
 	# When libmcu is an external library (preferred/fallback), the GNU linker will
 	# not extract it from the archive because the weak symbol in libmcu satisfies
@@ -117,39 +152,86 @@ function(pulse_sdk_collect out_srcs out_public_incs out_private_incs)
 	# extracted once the symbol is already defined by the direct-compiled object.
 	if(_PULSE_SDK_LIBMCU_RESOLVED_ROOT_SOURCE STREQUAL "bundled" OR
 			_PULSE_SDK_LIBMCU_RESOLVED_ROOT_SOURCE STREQUAL "fetched")
+		set(_platform "")
+		if(DEFINED PULSE_SDK_PLATFORM_OVERRIDE AND
+				NOT PULSE_SDK_PLATFORM_OVERRIDE STREQUAL "")
+			string(TOLOWER "${PULSE_SDK_PLATFORM_OVERRIDE}" _platform)
+		elseif(COMMAND idf_component_register)
+			set(_platform "esp-idf")
+		elseif(DEFINED ZEPHYR_BASE)
+			set(_platform "zephyr")
+		elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+			set(_platform "linux")
+		else()
+			set(_platform "baremetal")
+		endif()
+
 		list(APPEND _srcs
 			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/common/src/assert.c
 			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metrics.c
 			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metricfs.c)
 
-		if(COMMAND idf_component_register AND
+		if(_platform STREQUAL "esp-idf" AND
 				EXISTS "${PULSE_SDK_ROOT}/ports/esp-idf/pulse_overrides.c")
+			_pulse_sdk_resolve_transport_source(
+				"${PULSE_SDK_ROOT}/ports/esp-idf" _transport_src)
 			list(APPEND _srcs
 				${PULSE_SDK_ROOT}/ports/esp-idf/pulse_overrides.c
-				${PULSE_SDK_ROOT}/ports/esp-idf/pulse_transport_https.c)
-		elseif(DEFINED ZEPHYR_BASE AND
+				${_transport_src})
+		elseif(_platform STREQUAL "zephyr" AND
 				EXISTS "${PULSE_SDK_ROOT}/ports/zephyr/pulse_overrides.c")
+			_pulse_sdk_resolve_transport_source(
+				"${PULSE_SDK_ROOT}/ports/zephyr" _transport_src)
 			list(APPEND _srcs
 				${PULSE_SDK_ROOT}/ports/zephyr/pulse_overrides.c
-				${PULSE_SDK_ROOT}/ports/zephyr/pulse_transport_https.c)
-		elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+				${_transport_src})
+		elseif(_platform STREQUAL "linux" AND
 				EXISTS "${PULSE_SDK_ROOT}/ports/linux/pulse_overrides.c")
-			list(APPEND _srcs
-				${PULSE_SDK_ROOT}/ports/linux/pulse_overrides.c
-				${PULSE_SDK_ROOT}/ports/linux/pulse_transport_https.c)
-		elseif(NOT DEFINED ZEPHYR_BASE AND NOT COMMAND idf_component_register AND
+			_pulse_sdk_resolve_transport_source(
+				"${PULSE_SDK_ROOT}/ports/linux" _transport_src)
+			list(APPEND _srcs ${PULSE_SDK_ROOT}/ports/linux/pulse_overrides.c)
+			list(APPEND _srcs ${_transport_src})
+		elseif(_platform STREQUAL "baremetal" AND
 				EXISTS "${PULSE_SDK_ROOT}/ports/baremetal/pulse_overrides.c")
+			_pulse_sdk_resolve_transport_source(
+				"${PULSE_SDK_ROOT}/ports/baremetal" _transport_src)
 			list(APPEND _srcs
 				${PULSE_SDK_ROOT}/ports/baremetal/pulse_overrides.c
-				${PULSE_SDK_ROOT}/ports/baremetal/pulse_transport_https.c)
+				${_transport_src})
 		endif()
 	endif()
 
 	list(REMOVE_DUPLICATES _srcs)
 	list(REMOVE_DUPLICATES _public_incs)
 	list(REMOVE_DUPLICATES _private_incs)
+	list(REMOVE_DUPLICATES _public_defs)
+
+	set(_https_src "${PULSE_SDK_ROOT}/ports/linux/pulse_transport_https.c")
+	set(_coaps_src "${PULSE_SDK_ROOT}/ports/linux/pulse_transport_coaps.c")
+	list(FIND _srcs ${_https_src} _https_idx)
+	list(FIND _srcs ${_coaps_src} _coaps_idx)
+
+	if(NOT _https_idx EQUAL -1)
+		find_package(CURL REQUIRED)
+		list(APPEND _public_links CURL::libcurl)
+	endif()
+
+	if(NOT _coaps_idx EQUAL -1)
+		find_package(PkgConfig REQUIRED)
+		pkg_check_modules(PULSE_SDK_LIBCOAP REQUIRED IMPORTED_TARGET libcoap-3-openssl)
+		pkg_check_modules(PULSE_SDK_LIBCRYPTO REQUIRED IMPORTED_TARGET libcrypto)
+		pkg_check_modules(PULSE_SDK_LIBSSL REQUIRED IMPORTED_TARGET libssl)
+		list(APPEND _public_links
+			PkgConfig::PULSE_SDK_LIBCOAP
+			PkgConfig::PULSE_SDK_LIBCRYPTO
+			PkgConfig::PULSE_SDK_LIBSSL)
+	endif()
+
+	list(REMOVE_DUPLICATES _public_links)
 
 	set(${out_srcs} ${_srcs} PARENT_SCOPE)
 	set(${out_public_incs} ${_public_incs} PARENT_SCOPE)
 	set(${out_private_incs} ${_private_incs} PARENT_SCOPE)
+	set(${out_public_defs} ${_public_defs} PARENT_SCOPE)
+	set(${out_public_links} ${_public_links} PARENT_SCOPE)
 endfunction()

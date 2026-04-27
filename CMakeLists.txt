@@ -7,7 +7,7 @@ endif()
 include(${CMAKE_CURRENT_LIST_DIR}/pulse-sdk.cmake)
 
 if(COMMAND idf_component_register)
-	pulse_sdk_collect(PULSE_SDK_SRCS PULSE_SDK_PUBLIC_INCS PULSE_SDK_PRIVATE_INCS)
+	pulse_sdk_collect(PULSE_SDK_SRCS PULSE_SDK_PUBLIC_INCS PULSE_SDK_PRIVATE_INCS PULSE_SDK_PUBLIC_DEFS PULSE_SDK_PUBLIC_LINKS)
 
 	idf_component_register(
 		SRCS ${PULSE_SDK_SRCS}
@@ -18,6 +18,8 @@ if(COMMAND idf_component_register)
 	)
 
 	target_compile_features(${COMPONENT_LIB} PRIVATE c_std_99)
+	target_compile_definitions(${COMPONENT_LIB} PUBLIC ${PULSE_SDK_PUBLIC_DEFS})
+	target_link_libraries(${COMPONENT_LIB} PUBLIC ${PULSE_SDK_PUBLIC_LINKS})
 
 	if(NOT DEFINED METRICS_USER_DEFINES AND DEFINED PROJECT_DIR AND
 			EXISTS "${PROJECT_DIR}/main/metrics.def")
@@ -31,7 +33,7 @@ endif()
 
 project(pulse-sdk LANGUAGES C)
 
-pulse_sdk_collect(PULSE_SDK_SRCS PULSE_SDK_PUBLIC_INCS PULSE_SDK_PRIVATE_INCS)
+pulse_sdk_collect(PULSE_SDK_SRCS PULSE_SDK_PUBLIC_INCS PULSE_SDK_PRIVATE_INCS PULSE_SDK_PUBLIC_DEFS PULSE_SDK_PUBLIC_LINKS)
 
 add_library(${PROJECT_NAME} STATIC ${PULSE_SDK_SRCS})
 add_library(pulse::sdk ALIAS ${PROJECT_NAME})
@@ -41,6 +43,8 @@ target_include_directories(${PROJECT_NAME}
 	PUBLIC ${PULSE_SDK_PUBLIC_INCS}
 	PRIVATE ${PULSE_SDK_PRIVATE_INCS}
 )
+target_compile_definitions(${PROJECT_NAME} PUBLIC ${PULSE_SDK_PUBLIC_DEFS})
+target_link_libraries(${PROJECT_NAME} PUBLIC ${PULSE_SDK_PUBLIC_LINKS})
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 	target_compile_definitions(${PROJECT_NAME}
@@ -59,6 +63,7 @@ if(BUILD_TESTING)
 	set(_test_srcs ${PULSE_SDK_SRCS})
 	list(FILTER _test_srcs EXCLUDE REGEX "pulse_overrides\\.c$")
 	list(FILTER _test_srcs EXCLUDE REGEX "pulse_transport_https\\.c$")
+	list(FILTER _test_srcs EXCLUDE REGEX "pulse_transport_coaps\\.c$")
 	list(FILTER _test_srcs EXCLUDE REGEX "metricfs\\.c$")
 	add_library(pulse-sdk-testable STATIC ${_test_srcs})
 	target_compile_features(pulse-sdk-testable PRIVATE c_std_99)
