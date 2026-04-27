@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: MIT
+
+menu "Pulse SDK"
+
+choice PULSE_SDK_TRANSPORT
+	prompt "Transport protocol"
+	default PULSE_SDK_TRANSPORT_COAPS
+	help
+	  Select the transport used to send metrics to the ingest server.
+
+config PULSE_SDK_TRANSPORT_COAPS
+	bool "CoAPS (CoAP over DTLS PSK)"
+	help
+	  Send metrics over CoAP with DTLS PSK authentication.
+	  The authentication token supplied to pulse_init() is used as the PSK.
+
+config PULSE_SDK_TRANSPORT_HTTPS
+	bool "HTTPS"
+	help
+	  Send metrics over HTTPS over TLS.
+
+endchoice
+
+endmenu

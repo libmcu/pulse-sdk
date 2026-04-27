@@ -20,6 +20,7 @@ extern "C" {
 #define PULSE_INGEST_PATH	"/v1"
 #define PULSE_INGEST_URL_HTTPS	"https://" PULSE_INGEST_HOST PULSE_INGEST_PATH
 #define PULSE_INGEST_URL_COAPS	"coaps://" PULSE_INGEST_HOST PULSE_INGEST_PATH
+#define PULSE_INGEST_PORT_COAPS	5684u
 
 struct pulse_report_ctx {
 	void *user_ctx;

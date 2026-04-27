@@ -12,6 +12,12 @@
 #define EXAMPLE_SOFTWARE_VERSION	"1.0.0-test"
 #define EXAMPLE_METRIC_VALUE		24
 
+#if defined(PULSE_SDK_TRANSPORT_COAPS) && PULSE_SDK_TRANSPORT_COAPS
+#define EXAMPLE_TRANSPORT_NAME	"coaps"
+#else
+#define EXAMPLE_TRANSPORT_NAME	"https"
+#endif
+
 static void update_metrics(void *ctx)
 {
 	(void)ctx;
@@ -37,9 +43,9 @@ static void call_this_periodically(void)
 		return;
 	}
 
-	printf("reported PulseMetric=%d to Pulse ingest as %s (%s)\n",
-			EXAMPLE_METRIC_VALUE, EXAMPLE_SERIAL_NUMBER,
-			EXAMPLE_SOFTWARE_VERSION);
+	printf("reported PulseMetric=%d to Pulse ingest via %s as %s (%s)\n",
+			EXAMPLE_METRIC_VALUE, EXAMPLE_TRANSPORT_NAME,
+			EXAMPLE_SERIAL_NUMBER, EXAMPLE_SOFTWARE_VERSION);
 }
 
 int main(void)

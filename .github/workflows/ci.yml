@@ -37,7 +37,8 @@ jobs:
         run: |
           cmake -B build \
             -DBUILD_TESTING=ON \
-            -DCMAKE_BUILD_TYPE=Debug
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPULSE_SDK_TRANSPORT=https
 
       - name: Build
         run: cmake --build build --parallel $(nproc)
@@ -51,6 +52,9 @@ jobs:
   build-linux:
     name: Build / Linux
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        transport: [https, coaps]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,17 +67,26 @@ jobs:
           key: cmake-deps-${{ runner.os }}-${{ hashFiles('pulse-sdk.cmake') }}
           restore-keys: cmake-deps-${{ runner.os }}-
 
-      - name: Install dependencies
+      - name: Install dependencies (https)
+        if: matrix.transport == 'https'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake libcurl4-openssl-dev
 
+      - name: Install dependencies (coaps)
+        if: matrix.transport == 'coaps'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config libcoap3-dev libssl-dev
+
       - name: Configure
         run: |
           cmake -B examples/linux/build \
             -S examples/linux \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULSE_SDK_TRANSPORT=${{ matrix.transport }}
 
       - name: Build
         run: cmake --build examples/linux/build --parallel $(nproc)
@@ -103,7 +116,8 @@ jobs:
         run: |
           cmake -B examples/generic-cmake/build \
             -S examples/generic-cmake \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULSE_SDK_TRANSPORT=https
 
       - name: Build
         run: cmake --build examples/generic-cmake/build --parallel $(nproc)
