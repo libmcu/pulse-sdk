@@ -153,6 +153,9 @@ jobs:
   build-esp-idf:
     name: Build / ESP-IDF
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        transport: [https, coaps]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -161,6 +164,14 @@ jobs:
 
       - name: Copy example to project root
         run: cp -r components/pulse-sdk/examples/esp-idf/* .
+
+      - name: Configure transport (https)
+        if: matrix.transport == 'https'
+        run: echo "CONFIG_PULSE_SDK_TRANSPORT_HTTPS=y" > sdkconfig.defaults
+
+      - name: Configure transport (coaps)
+        if: matrix.transport == 'coaps'
+        run: echo "CONFIG_PULSE_SDK_TRANSPORT_COAPS=y" > sdkconfig.defaults
 
       - name: Build with ESP-IDF
         uses: espressif/esp-idf-ci-action@v1

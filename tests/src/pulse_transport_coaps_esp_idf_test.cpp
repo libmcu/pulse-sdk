@@ -7,7 +7,7 @@ extern "C" {
 #include <string.h>
 
 #include "coap3/coap.h"
-#include "mbedtls/sha256.h"
+#include "psa/crypto.h"
 
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
@@ -35,7 +35,7 @@ TEST_GROUP(PulseTransportCoapsEspIdf)
 		memset(g_response_buf, 0, sizeof(g_response_buf));
 		g_response_len = 0u;
 		coap_mock_reset();
-		mbedtls_sha256_mock_reset();
+		psa_crypto_mock_reset();
 		pulse_transport_cancel();
 	}
 };
@@ -68,15 +68,49 @@ TEST(PulseTransportCoapsEspIdf, ShouldReturnOverflowWhenPayloadExceedsIntMax)
 					(size_t)INT_MAX + 1u, &g_ctx));
 }
 
-TEST(PulseTransportCoapsEspIdf,
-		ShouldReturnNotSupportedWhenAsyncTransportRequested)
+TEST(PulseTransportCoapsEspIdf, ShouldReturnInProgressWhenAsyncAndNotYetDone)
 {
 	static const uint8_t payload[] = { 0x01 };
 
 	g_ctx.conf.token = "test-token";
 	g_ctx.conf.async_transport = true;
+	coap_mock_suppress_response();
 
-	CHECK_EQUAL(-ENOTSUP,
+	CHECK_EQUAL(-EINPROGRESS,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+}
+
+TEST(PulseTransportCoapsEspIdf,
+		ShouldResumeSessionOnSecondCallWhenAsyncInProgress)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	g_ctx.conf.token = "test-token";
+	g_ctx.conf.async_transport = true;
+	coap_mock_suppress_response();
+
+	CHECK_EQUAL(-EINPROGRESS,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+
+	CHECK_EQUAL(-EINPROGRESS,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+}
+
+TEST(PulseTransportCoapsEspIdf,
+		ShouldCompleteAsyncSessionWhenResponseArrivesOnSubsequentCall)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	g_ctx.conf.token = "test-token";
+	g_ctx.conf.async_transport = true;
+	coap_mock_suppress_response();
+
+	CHECK_EQUAL(-EINPROGRESS,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+
+	coap_mock_allow_response();
+
+	CHECK_EQUAL(0,
 			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
 }
 
@@ -93,7 +127,7 @@ TEST(PulseTransportCoapsEspIdf, ShouldReturnIoErrorWhenSha256Fails)
 	static const uint8_t payload[] = { 0x01 };
 
 	g_ctx.conf.token = "test-token";
-	mbedtls_sha256_mock_set_result(-1);
+	psa_crypto_mock_set_result(PSA_ERROR_GENERIC_ERROR);
 
 	CHECK_EQUAL(-EIO,
 			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
@@ -170,8 +204,8 @@ TEST(PulseTransportCoapsEspIdf,
 	pulse_transport_transmit(payload, sizeof(payload), &g_ctx);
 
 	CHECK_EQUAL(strlen("token-123"),
-			(int)mbedtls_sha256_mock_last_input_len());
-	MEMCMP_EQUAL("token-123", mbedtls_sha256_mock_last_input(),
+			(int)psa_crypto_mock_last_input_len());
+	MEMCMP_EQUAL("token-123", psa_crypto_mock_last_input(),
 			strlen("token-123"));
 }
 

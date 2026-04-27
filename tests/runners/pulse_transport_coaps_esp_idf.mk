@@ -10,7 +10,7 @@ TEST_SRC_FILES = \
 	src/test_all.cpp \
 	mocks/coap_mock.cpp \
 	mocks/openssl_mock.cpp \
-	mocks/mbedtls_sha256_mock.cpp \
+	mocks/psa_crypto_mock.cpp \
 
 INCLUDE_DIRS = \
 	$(CPPUTEST_HOME)/include \

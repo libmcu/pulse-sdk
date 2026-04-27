@@ -12,7 +12,13 @@
 #include <string.h>
 
 #include <coap3/coap.h>
+#include <mbedtls/version.h>
+
+#if MBEDTLS_VERSION_NUMBER >= 0x04000000
+#include <psa/crypto.h>
+#else
 #include <mbedtls/sha256.h>
+#endif
 
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
@@ -21,6 +27,11 @@
 #define COAPS_RESPONSE_BUFSIZE		4096u
 #define PSK_IDENTITY_HEX_LEN		32u
 #define PSK_IDENTITY_BUFSIZE		(PSK_IDENTITY_HEX_LEN + 1u)
+
+typedef enum {
+	STATE_IDLE,
+	STATE_IN_PROGRESS,
+} coaps_state_t;
 
 typedef struct {
 	uint8_t data[COAPS_RESPONSE_BUFSIZE];
@@ -36,6 +47,17 @@ typedef struct {
 	bool done;
 } exchange_t;
 
+typedef struct {
+	coap_context_t *ctx;
+	coap_session_t *session;
+	exchange_t ex;
+	response_buf_t response;
+	coaps_state_t state;
+	const struct pulse_report_ctx *rctx;
+} coaps_session_t;
+
+static coaps_session_t m_session;
+
 static uint32_t get_timeout_ms(const struct pulse *conf)
 {
 	if (conf != NULL && conf->transmit_timeout_ms > 0u) {
@@ -49,13 +71,24 @@ static int compute_psk_identity(char buf[static PSK_IDENTITY_BUFSIZE],
 		const char *token)
 {
 	static const char HEX[] = "0123456789abcdef";
-	unsigned char digest[32];
+	uint8_t digest[32];
 	size_t i;
 
+#if MBEDTLS_VERSION_NUMBER >= 0x04000000
+	size_t digest_len;
+
+	if (psa_hash_compute(PSA_ALG_SHA_256,
+				(const uint8_t *)token, strlen(token),
+				digest, sizeof(digest),
+				&digest_len) != PSA_SUCCESS) {
+		return -EIO;
+	}
+#else
 	if (mbedtls_sha256((const unsigned char *)token, strlen(token),
 				digest, 0) != 0) {
 		return -EIO;
 	}
+#endif
 
 	for (i = 0u; i < PSK_IDENTITY_HEX_LEN / 2u; i++) {
 		buf[i * 2u]       = HEX[(digest[i] >> 4) & 0x0fu];
@@ -195,60 +228,6 @@ static void on_coap_nack(coap_session_t *session, const coap_pdu_t *sent,
 	ex->done = true;
 }
 
-static int run_io_loop(coap_context_t *ctx, exchange_t *ex,
-		uint32_t timeout_ms)
-{
-	uint32_t remaining = timeout_ms;
-	int elapsed;
-
-	while (!ex->done && remaining > 0u) {
-		elapsed = coap_io_process(ctx, remaining);
-
-		if (elapsed < 0) {
-			return -EIO;
-		}
-
-		if ((uint32_t)elapsed >= remaining) {
-			remaining = 0u;
-		} else {
-			remaining -= (uint32_t)elapsed;
-		}
-
-		if (!ex->done && elapsed == 0 && !coap_io_pending(ctx)) {
-			break;
-		}
-	}
-
-	return ex->done ? 0 : -ETIMEDOUT;
-}
-
-static int do_exchange(coap_context_t *ctx, coap_session_t *session,
-		coap_pdu_t **pdu, exchange_t *ex, uint32_t timeout_ms)
-{
-	int ret;
-
-	coap_session_set_app_data(session, ex);
-	coap_register_response_handler(ctx, on_coap_response);
-	coap_register_nack_handler(ctx, on_coap_nack);
-
-	ex->mid = coap_send(session, *pdu);
-	*pdu = NULL;
-
-	if (ex->mid == COAP_INVALID_MID) {
-		ret = -EIO;
-		goto out;
-	}
-
-	ret = run_io_loop(ctx, ex, timeout_ms);
-
-out:
-	coap_register_response_handler(ctx, NULL);
-	coap_register_nack_handler(ctx, NULL);
-	coap_session_set_app_data(session, NULL);
-
-	return ret;
-}
-
 static int evaluate_response(coap_pdu_code_t code, const response_buf_t *buf)
 {
 	if (code != COAP_RESPONSE_CODE_CHANGED) {
@@ -266,90 +245,156 @@ static void deliver_response(const response_buf_t *buf,
 	}
 }
 
-static int transmit_once(const void *data, size_t datasize,
-		const struct pulse_report_ctx *ctx)
+static void cleanup_session(coaps_session_t *s)
 {
-	const struct pulse *conf = &ctx->conf;
+	if (s->session != NULL) {
+		coap_register_response_handler(s->ctx, NULL);
+		coap_register_nack_handler(s->ctx, NULL);
+		coap_session_set_app_data(s->session, NULL);
+		coap_session_release(s->session);
+		s->session = NULL;
+	}
+	if (s->ctx != NULL) {
+		coap_free_context(s->ctx);
+		s->ctx = NULL;
+	}
+	s->state = STATE_IDLE;
+	s->rctx = NULL;
+}
+
+static int start_session(coaps_session_t *s, const void *data, size_t datasize,
+		const struct pulse_report_ctx *rctx)
+{
+	const struct pulse *conf = &rctx->conf;
 	char psk_id[PSK_IDENTITY_BUFSIZE];
 	coap_dtls_cpsk_t psk;
 	coap_addr_info_t *addr = NULL;
-	coap_context_t *coap_ctx = NULL;
-	coap_session_t *session = NULL;
 	coap_pdu_t *pdu = NULL;
-	response_buf_t response;
-	exchange_t ex;
 	int ret;
 
-	memset(&response, 0, sizeof(response));
-	memset(&ex, 0, sizeof(ex));
-	ex.response = &response;
+	memset(&s->response, 0, sizeof(s->response));
+	memset(&s->ex, 0, sizeof(s->ex));
+	s->ex.response = &s->response;
+	s->rctx = rctx;
 
 	ret = compute_psk_identity(psk_id, conf->token);
 	if (ret != 0) {
-		goto cleanup;
+		goto fail;
 	}
 
-	coap_ctx = coap_new_context(NULL);
-	if (coap_ctx == NULL) {
+	s->ctx = coap_new_context(NULL);
+	if (s->ctx == NULL) {
 		ret = -ENOMEM;
-		goto cleanup;
+		goto fail;
 	}
 
 	ret = resolve_server(&addr);
 	if (ret != 0) {
-		goto cleanup;
+		goto fail;
 	}
 
 	fill_psk_config(&psk, psk_id, conf->token);
-	session = coap_new_client_session_psk2(coap_ctx, NULL, &addr->addr,
+	s->session = coap_new_client_session_psk2(s->ctx, NULL, &addr->addr,
 			COAP_PROTO_DTLS, &psk);
-	if (session == NULL) {
+	coap_free_address_info(addr);
+	addr = NULL;
+
+	if (s->session == NULL) {
 		ret = -EIO;
-		goto cleanup;
+		goto fail;
 	}
 
-	ret = build_coap_pdu(&pdu, session, data, datasize);
+	coap_session_set_app_data(s->session, &s->ex);
+	coap_register_response_handler(s->ctx, on_coap_response);
+	coap_register_nack_handler(s->ctx, on_coap_nack);
+
+	ret = build_coap_pdu(&pdu, s->session, data, datasize);
 	if (ret != 0) {
-		goto cleanup;
+		goto fail;
 	}
 
-	ret = do_exchange(coap_ctx, session, &pdu, &ex, get_timeout_ms(conf));
-	if (ret == 0 && ex.error != 0) {
-		ret = ex.error;
-	}
-	if (ret == 0) {
-		ret = evaluate_response(ex.code, &response);
-	}
-	if (ret == 0) {
-		deliver_response(&response, ctx);
+	s->ex.mid = coap_send(s->session, pdu);
+	pdu = NULL;
+
+	if (s->ex.mid == COAP_INVALID_MID) {
+		ret = -EIO;
+		goto fail;
 	}
 
-cleanup:
+	s->state = STATE_IN_PROGRESS;
+	return 0;
+
+fail:
 	if (pdu != NULL) {
 		coap_delete_pdu(pdu);
-	}
-	if (session != NULL) {
-		coap_session_release(session);
 	}
 	if (addr != NULL) {
 		coap_free_address_info(addr);
 	}
-	if (coap_ctx != NULL) {
-		coap_free_context(coap_ctx);
+	cleanup_session(s);
+	return ret;
+}
+
+static int advance_session(coaps_session_t *s, bool async,
+		uint32_t timeout_ms)
+{
+	uint32_t remaining = timeout_ms;
+	int elapsed;
+
+	do {
+		elapsed = coap_io_process(s->ctx, async ? 0u : remaining);
+
+		if (elapsed < 0) {
+			cleanup_session(s);
+			return -EIO;
+		}
+
+		if (async) {
+			break;
+		}
+
+		if ((uint32_t)elapsed >= remaining) {
+			remaining = 0u;
+		} else {
+			remaining -= (uint32_t)elapsed;
+		}
+
+		if (!s->ex.done && elapsed == 0 && !coap_io_pending(s->ctx)) {
+			break;
+		}
+	} while (!s->ex.done && remaining > 0u);
+
+	if (!s->ex.done) {
+		if (async) {
+			return -EINPROGRESS;
+		}
+		cleanup_session(s);
+		return -ETIMEDOUT;
 	}
 
+	int ret = s->ex.error;
+
+	if (ret == 0) {
+		ret = evaluate_response(s->ex.code, &s->response);
+	}
+	if (ret == 0) {
+		deliver_response(&s->response, s->rctx);
+	}
+
+	cleanup_session(s);
 	return ret;
 }
 
 void pulse_transport_cancel(void)
 {
+	cleanup_session(&m_session);
+	coap_cleanup();
 }
 
 int pulse_transport_transmit(const void *data, size_t datasize,
 		const struct pulse_report_ctx *ctx)
 {
 	const struct pulse *conf = ctx != NULL ? &ctx->conf : NULL;
-	int ret;
 
 	if (data == NULL || datasize == 0u) {
 		return -EINVAL;
@@ -363,13 +408,16 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 		return -EINVAL;
 	}
 
-	if (conf->async_transport) {
-		return -ENOTSUP;
+	const bool async = conf->async_transport;
+
+	if (m_session.state == STATE_IDLE) {
+		coap_startup();
+		int ret = start_session(&m_session, data, datasize, ctx);
+		if (ret != 0) {
+			coap_cleanup();
+			return ret;
+		}
 	}
 
-	coap_startup();
-	ret = transmit_once(data, datasize, ctx);
-	coap_cleanup();
-
-	return ret;
+	return advance_session(&m_session, async, get_timeout_ms(conf));
 }

@@ -45,6 +45,7 @@ static struct {
 	size_t response_offset;
 	size_t response_total;
 	int has_response_payload;
+	int suppress_response;
 	char client_sni[128];
 	char psk_identity[128];
 	char psk_key[128];
@@ -83,6 +84,7 @@ extern "C" void coap_mock_reset(void)
 	g_state.session_result = &g_default_session;
 	g_state.send_recv_result = 0;
 	g_state.last_mid = 1;
+	g_state.suppress_response = 0;
 	g_state.response_code = COAP_RESPONSE_CODE_CHANGED;
 	g_default_addr_info.next = NULL;
 	g_default_addr_info.scheme = COAP_URI_SCHEME_COAPS;
@@ -107,6 +109,16 @@ extern "C" void coap_mock_set_session_result(coap_session_t *session)
 extern "C" void coap_mock_set_send_recv_result(int result)
 {
 	g_state.send_recv_result = result;
+}
+
+extern "C" void coap_mock_suppress_response(void)
+{
+	g_state.suppress_response = 1;
+}
+
+extern "C" void coap_mock_allow_response(void)
+{
+	g_state.suppress_response = 0;
 }
 
 extern "C" void coap_mock_set_response_code(coap_pdu_code_t code)
@@ -369,8 +381,12 @@ extern "C" int coap_io_process(coap_context_t *ctx, uint32_t timeout_ms)
 	}
 
 	if (g_state.response_handler != NULL) {
-		g_state.response_handler(&g_default_session, &g_default_request_pdu,
-				&g_default_response_pdu, g_state.last_mid);
+		if (!g_state.suppress_response) {
+			g_state.response_handler(&g_default_session,
+					&g_default_request_pdu,
+					&g_default_response_pdu,
+					g_state.last_mid);
+		}
 	}
 
 	return 1;
