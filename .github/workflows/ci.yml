@@ -37,7 +37,8 @@ jobs:
         run: |
           cmake -B build \
             -DBUILD_TESTING=ON \
-            -DCMAKE_BUILD_TYPE=Debug
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPULSE_SDK_TRANSPORT=https
 
       - name: Build
         run: cmake --build build --parallel $(nproc)
@@ -115,7 +116,8 @@ jobs:
         run: |
           cmake -B examples/generic-cmake/build \
             -S examples/generic-cmake \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULSE_SDK_TRANSPORT=https
 
       - name: Build
         run: cmake --build examples/generic-cmake/build --parallel $(nproc)
