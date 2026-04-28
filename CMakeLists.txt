@@ -28,6 +28,7 @@ if(COMMAND idf_component_register)
 		PRIV_INCLUDE_DIRS ${PULSE_SDK_PRIVATE_INCS}
 		REQUIRES ${_idf_requires}
 		PRIV_REQUIRES ${_idf_priv_requires}
+		KCONFIG "${CMAKE_CURRENT_LIST_DIR}/ports/esp-idf/Kconfig"
 	)
 
 	target_compile_features(${COMPONENT_LIB} PRIVATE c_std_99)

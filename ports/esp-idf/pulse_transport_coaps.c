@@ -195,9 +195,10 @@ static int map_nack_reason(coap_nack_reason_t reason)
 	case COAP_NACK_TOO_MANY_RETRIES:
 		return -ETIMEDOUT;
 	case COAP_NACK_NOT_DELIVERABLE:
+		return -EIO;
 	case COAP_NACK_TLS_FAILED:
 	case COAP_NACK_TLS_LAYER_FAILED:
-		return -ECANCELED;
+		return -EPROTO;
 	default:
 		return -EIO;
 	}
