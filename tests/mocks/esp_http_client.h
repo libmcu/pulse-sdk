@@ -62,6 +62,7 @@ typedef struct {
 	http_event_handle_cb event_handler;
 	void *user_data;
 	bool is_async;
+	const char *user_agent;
 } esp_http_client_config_t;
 
 esp_http_client_handle_t esp_http_client_init(
