@@ -139,6 +139,7 @@ function(pulse_sdk_collect out_srcs out_public_incs out_private_incs)
 	#   - <libmcu>/modules/metrics/src/metrics.c
 	#   - <libmcu>/modules/metrics/src/metricfs.c
 	#   - <libmcu>/modules/common/src/assert.c
+	#   - <libmcu>/modules/common/src/base64.c (coaps transport only)
 	#   - ports/<platform>/pulse_overrides.c
 	#   - ports/<platform>/pulse_transport_<transport>.c
 	#
@@ -170,6 +171,11 @@ function(pulse_sdk_collect out_srcs out_public_incs out_private_incs)
 			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/common/src/assert.c
 			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metrics.c
 			${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metricfs.c)
+
+		if(_transport STREQUAL "coaps")
+			list(APPEND _srcs
+				${_PULSE_SDK_LIBMCU_RESOLVED_ROOT}/modules/common/src/base64.c)
+		endif()
 
 		if(_platform STREQUAL "esp-idf" AND
 				EXISTS "${PULSE_SDK_ROOT}/ports/esp-idf/pulse_overrides.c")

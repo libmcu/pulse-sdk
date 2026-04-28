@@ -257,5 +257,6 @@ Your application must provide required Pulse metadata directly via `struct pulse
 > - `<libmcu>/modules/metrics/src/metrics.c`
 > - `<libmcu>/modules/metrics/src/metricfs.c`
 > - `<libmcu>/modules/common/src/assert.c`
+> - `<libmcu>/modules/common/src/base64.c` (when `PULSE_SDK_TRANSPORT=coaps`)
 > - `ports/<platform>/pulse_overrides.c`
 > - `ports/<platform>/pulse_transport_<transport>.c`

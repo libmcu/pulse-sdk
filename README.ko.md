@@ -256,5 +256,6 @@ Make 통합 시 `pulse-sdk.mk`는 아래 순서로 의존성을 해석합니다.
 > - `<libmcu>/modules/metrics/src/metrics.c`
 > - `<libmcu>/modules/metrics/src/metricfs.c`
 > - `<libmcu>/modules/common/src/assert.c`
+> - `<libmcu>/modules/common/src/base64.c` (`PULSE_SDK_TRANSPORT=coaps` 사용 시)
 > - `ports/<platform>/pulse_overrides.c`
 > - `ports/<platform>/pulse_transport_<transport>.c`
