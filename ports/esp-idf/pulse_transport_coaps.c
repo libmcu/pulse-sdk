@@ -27,6 +27,7 @@
 #define COAPS_RESPONSE_BUFSIZE		4096u
 #define PSK_IDENTITY_HEX_LEN		32u
 #define PSK_IDENTITY_BUFSIZE		(PSK_IDENTITY_HEX_LEN + 1u)
+#define PSK_KEY_LEN			32u
 
 typedef enum {
 	STATE_IDLE,
@@ -58,6 +59,52 @@ typedef struct {
 } coaps_session_t;
 
 static coaps_session_t m_session;
+
+static int base64url_decode(uint8_t *dst, size_t dst_size,
+		const char *src, size_t src_len)
+{
+	static const int8_t T[256] = {
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,
+		52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,
+		-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
+		15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,63,
+		-1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
+		41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+	};
+	size_t out = 0;
+	uint32_t acc = 0;
+	int bits = 0;
+	size_t i;
+
+	for (i = 0u; i < src_len; i++) {
+		int v = T[(unsigned char)src[i]];
+
+		if (v < 0) {
+			return -EINVAL;
+		}
+		acc = (acc << 6) | (uint32_t)v;
+		bits += 6;
+		if (bits >= 8) {
+			bits -= 8;
+			if (out >= dst_size) {
+				return -EINVAL;
+			}
+			dst[out++] = (uint8_t)(acc >> bits);
+		}
+	}
+
+	return (int)out;
+}
 
 static uint32_t get_timeout_ms(const struct pulse *conf)
 {
@@ -109,15 +156,16 @@ static int compute_psk_identity(char buf[static PSK_IDENTITY_BUFSIZE],
 }
 
 static void fill_psk_config(coap_dtls_cpsk_t *psk,
-		const char *identity, const char *token)
+		const char *identity,
+		const uint8_t *psk_key, size_t psk_key_len)
 {
 	memset(psk, 0, sizeof(*psk));
 	psk->version = COAP_DTLS_CPSK_SETUP_VERSION;
 	psk->client_sni = PULSE_INGEST_HOST;
 	psk->psk_info.identity.s = (const uint8_t *)identity;
 	psk->psk_info.identity.length = strlen(identity);
-	psk->psk_info.key.s = (const uint8_t *)token;
-	psk->psk_info.key.length = strlen(token);
+	psk->psk_info.key.s = psk_key;
+	psk->psk_info.key.length = psk_key_len;
 }
 
 static int resolve_server(coap_addr_info_t **info)
@@ -281,6 +329,7 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 {
 	const struct pulse *conf = &rctx->conf;
 	char psk_id[PSK_IDENTITY_BUFSIZE];
+	uint8_t psk_key[PSK_KEY_LEN];
 	coap_dtls_cpsk_t psk;
 	coap_addr_info_t *addr = NULL;
 	coap_pdu_t *pdu = NULL;
@@ -292,7 +341,14 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 	s->rctx = rctx;
 
 	ret = compute_psk_identity(psk_id, conf->token);
-	if (ret != 0) {
+    if (ret != 0) {
+        goto fail;
+    }
+
+	ret = base64url_decode(psk_key, sizeof(psk_key),
+			conf->token, strlen(conf->token));
+	if (ret != (int)PSK_KEY_LEN) {
+		ret = -EINVAL;
 		goto fail;
 	}
 
@@ -307,7 +363,7 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 		goto fail;
 	}
 
-	fill_psk_config(&psk, psk_id, conf->token);
+	fill_psk_config(&psk, psk_id, psk_key, sizeof(psk_key));
 	s->session = coap_new_client_session_psk2(s->ctx, NULL, &addr->addr,
 			COAP_PROTO_DTLS, &psk);
 	coap_free_address_info(addr);
