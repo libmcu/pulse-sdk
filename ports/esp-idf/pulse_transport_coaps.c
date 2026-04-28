@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "pulse/pulse.h"
+#include "pulse/pulse_internal.h"
+
 #include <errno.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -20,8 +23,7 @@
 #include <mbedtls/sha256.h>
 #endif
 
-#include "pulse/pulse.h"
-#include "pulse/pulse_internal.h"
+#include "libmcu/base64.h"
 
 #define COAPS_TIMEOUT_MS_DEFAULT	15000u
 #define COAPS_RESPONSE_BUFSIZE		4096u
@@ -59,52 +61,6 @@ typedef struct {
 } coaps_session_t;
 
 static coaps_session_t m_session;
-
-static int base64url_decode(uint8_t *dst, size_t dst_size,
-		const char *src, size_t src_len)
-{
-	static const int8_t T[256] = {
-		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,
-		52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,
-		-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
-		15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,63,
-		-1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
-		41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
-		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-		-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-	};
-	size_t out = 0;
-	uint32_t acc = 0;
-	int bits = 0;
-	size_t i;
-
-	for (i = 0u; i < src_len; i++) {
-		int v = T[(unsigned char)src[i]];
-
-		if (v < 0) {
-			return -EINVAL;
-		}
-		acc = (acc << 6) | (uint32_t)v;
-		bits += 6;
-		if (bits >= 8) {
-			bits -= 8;
-			if (out >= dst_size) {
-				return -EINVAL;
-			}
-			dst[out++] = (uint8_t)(acc >> bits);
-		}
-	}
-
-	return (int)out;
-}
 
 static uint32_t get_timeout_ms(const struct pulse *conf)
 {
@@ -345,7 +301,7 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
         goto fail;
     }
 
-	ret = base64url_decode(psk_key, sizeof(psk_key),
+	ret = lm_base64url_decode(psk_key, sizeof(psk_key),
 			conf->token, strlen(conf->token));
 	if (ret != (int)PSK_KEY_LEN) {
 		ret = -EINVAL;
