@@ -101,6 +101,7 @@ static esp_http_client_handle_t create_client(response_buf_t *rb,
 		.event_handler = on_http_event,
 		.user_data = rb,
 		.is_async = is_async,
+		.user_agent = "PulseSDK/1.0",
 	};
 
 	return esp_http_client_init(&config);
