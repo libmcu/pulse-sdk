@@ -297,13 +297,12 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 	s->rctx = rctx;
 
 	ret = compute_psk_identity(psk_id, conf->token);
-    if (ret != 0) {
-        goto fail;
-    }
+	if (ret != 0) {
+		goto fail;
+	}
 
-	ret = lm_base64url_decode(psk_key, sizeof(psk_key),
-			conf->token, strlen(conf->token));
-	if (ret != (int)PSK_KEY_LEN) {
+	if (lm_base64url_decode(psk_key, sizeof(psk_key),
+			conf->token, strlen(conf->token)) != PSK_KEY_LEN) {
 		ret = -EINVAL;
 		goto fail;
 	}

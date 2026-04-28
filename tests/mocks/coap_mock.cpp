@@ -49,6 +49,7 @@ static struct {
 	char client_sni[128];
 	char psk_identity[128];
 	char psk_key[128];
+	size_t psk_key_len;
 	char uri_path[64];
 	uint32_t content_format;
 	uint32_t timeout_ms;
@@ -155,6 +156,11 @@ extern "C" const char *coap_mock_last_psk_identity(void)
 extern "C" const char *coap_mock_last_psk_key(void)
 {
 	return g_state.psk_key;
+}
+
+extern "C" size_t coap_mock_last_psk_key_len(void)
+{
+	return g_state.psk_key_len;
 }
 
 extern "C" const char *coap_mock_last_uri_path(void)
@@ -285,6 +291,7 @@ extern "C" coap_session_t *coap_new_client_session_psk2(coap_context_t *ctx,
 	copy_text(g_state.psk_key, sizeof(g_state.psk_key),
 			setup_data->psk_info.key.s,
 			setup_data->psk_info.key.length);
+	g_state.psk_key_len = setup_data->psk_info.key.length;
 
 	return g_state.session_result;
 }
@@ -371,6 +378,8 @@ extern "C" int coap_io_process(coap_context_t *ctx, uint32_t timeout_ms)
 				reason = COAP_NACK_TOO_MANY_RETRIES;
 			} else if (g_state.send_recv_result == -6) {
 				reason = COAP_NACK_NOT_DELIVERABLE;
+			} else if (g_state.send_recv_result == -7) {
+				reason = COAP_NACK_TLS_FAILED;
 			}
 
 			g_state.nack_handler(&g_default_session, &g_default_request_pdu,

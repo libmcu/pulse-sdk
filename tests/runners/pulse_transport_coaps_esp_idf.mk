@@ -4,6 +4,7 @@ LIBMCU_ROOT = ../build/_deps/external_libmcu-src
 
 SRC_FILES = \
 	../ports/esp-idf/pulse_transport_coaps.c \
+	$(LIBMCU_ROOT)/modules/common/src/base64.c \
 
 TEST_SRC_FILES = \
 	src/pulse_transport_coaps_esp_idf_test.cpp \

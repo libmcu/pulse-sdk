@@ -161,6 +161,7 @@ void coap_mock_set_response_payload(const void *data, size_t len,
 const char *coap_mock_last_client_sni(void);
 const char *coap_mock_last_psk_identity(void);
 const char *coap_mock_last_psk_key(void);
+size_t coap_mock_last_psk_key_len(void);
 const char *coap_mock_last_uri_path(void);
 uint32_t coap_mock_last_content_format(void);
 uint32_t coap_mock_last_timeout_ms(void);
