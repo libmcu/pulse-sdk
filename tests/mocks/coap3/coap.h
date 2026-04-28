@@ -153,6 +153,8 @@ void coap_mock_set_context_result(coap_context_t *ctx);
 void coap_mock_set_resolve_result(int enabled);
 void coap_mock_set_session_result(coap_session_t *session);
 void coap_mock_set_send_recv_result(int result);
+void coap_mock_suppress_response(void);
+void coap_mock_allow_response(void);
 void coap_mock_set_response_code(coap_pdu_code_t code);
 void coap_mock_set_response_payload(const void *data, size_t len,
 		size_t offset, size_t total);

@@ -15,12 +15,19 @@ if(COMMAND idf_component_register)
 
 	pulse_sdk_collect(PULSE_SDK_SRCS PULSE_SDK_PUBLIC_INCS PULSE_SDK_PRIVATE_INCS PULSE_SDK_PUBLIC_DEFS PULSE_SDK_PUBLIC_LINKS)
 
+	# idf_component_register REQUIRES/PRIV_REQUIRES are resolved during the
+	# early-expansion pass, before Kconfig values are available.  List all
+	# possible transport deps unconditionally so both transports link
+	# correctly regardless of which pass evaluates this file.
+	set(_idf_requires coap mbedtls)
+	set(_idf_priv_requires esp_http_client esp_timer)
+
 	idf_component_register(
 		SRCS ${PULSE_SDK_SRCS}
 		INCLUDE_DIRS ${PULSE_SDK_PUBLIC_INCS}
 		PRIV_INCLUDE_DIRS ${PULSE_SDK_PRIVATE_INCS}
-		REQUIRES esp_http_client mbedtls
-		PRIV_REQUIRES esp_timer
+		REQUIRES ${_idf_requires}
+		PRIV_REQUIRES ${_idf_priv_requires}
 	)
 
 	target_compile_features(${COMPONENT_LIB} PRIVATE c_std_99)
