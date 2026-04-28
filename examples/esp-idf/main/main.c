@@ -8,7 +8,11 @@
 
 void app_main(void)
 {
-	struct pulse conf = { .token = "example-token" };
+	struct pulse conf = {
+		.token = "example-token",
+		.serial_number = "esp32-device-1",
+		.software_version = "1.0.0",
+	};
 	pulse_init(&conf);
 	pulse_report();
 }

@@ -127,6 +127,7 @@ Component config  --->
 Pulse SDK를 subdirectory로 추가하고 대상에 링크하시면 됩니다.
 
 ```cmake
+set(METRICS_USER_DEFINES "${CMAKE_CURRENT_SOURCE_DIR}/metrics.def")
 set(PULSE_SDK_TRANSPORT coaps CACHE STRING "") # 기본값
 # set(PULSE_SDK_TRANSPORT https CACHE STRING "")
 
@@ -134,14 +135,28 @@ add_subdirectory(path/to/pulse-sdk)
 target_link_libraries(your_target PRIVATE pulse-sdk)
 ```
 
-프로젝트 구조상 의존성 경로를 자동 탐지할 수 없으면, subdirectory 추가 전에 명시적으로 지정하시면 됩니다.
+프로젝트 구조상 의존성 경로를 자동 탐지할 수 없으면, subdirectory 추가 전에 명시적으로 지정하면 됩니다.
 
 ```cmake
 set(PULSE_SDK_LIBMCU_ROOT /path/to/libmcu)
 set(PULSE_SDK_CBOR_ROOT /path/to/cbor)
+set(METRICS_USER_DEFINES "${CMAKE_CURRENT_SOURCE_DIR}/metrics.def")
 
 add_subdirectory(path/to/pulse-sdk)
 target_link_libraries(your_target PRIVATE pulse-sdk)
+```
+
+애플리케이션이 이미 `libmcu`를 자체 방식으로 빌드/링크하고 있다면 그대로 유지하면 됩니다.
+Pulse SDK는 `libmcu`를 public 의존성으로 사용하고, `cbor`는 SDK 내부 구현 의존성으로만 사용합니다.
+
+애플리케이션이 `retry`, `ratelim` 같은 일반 `libmcu` 모듈도 함께 쓰고 싶다면,
+다른 `libmcu` 복사본을 하나 더 clone해서 링크하지 말고 Pulse SDK가 resolve한
+같은 dependency target을 재사용하는 쪽을 권장합니다.
+
+```cmake
+target_link_libraries(your_target PRIVATE
+	pulse-sdk
+	pulse::dep::libmcu)
 ```
 
 ### Linux
@@ -154,6 +169,7 @@ Linux에서는 `pulse_sdk_collect()`가 아래 파일을 추가합니다.
 기본 통합 방법은 일반 CMake와 동일합니다.
 
 ```cmake
+set(METRICS_USER_DEFINES "${CMAKE_CURRENT_SOURCE_DIR}/metrics.def")
 set(PULSE_SDK_TRANSPORT coaps CACHE STRING "") # 기본값
 # set(PULSE_SDK_TRANSPORT https CACHE STRING "")
 
@@ -175,6 +191,7 @@ include $(PULSE_SDK_ROOT)/pulse-sdk.mk
 
 APP_SRCS += $(PULSE_SDK_SRCS)
 APP_INCS += $(PULSE_SDK_INCS)
+# LDFLAGS += $(PULSE_SDK_LDFLAGS)  # only needed if you archive Pulse SDK separately
 ```
 
 `LIBMCU_ROOT`가 `$(PULSE_SDK_ROOT)/external/libmcu`로 해석되면, Make 통합은 아래 항목도 함께 포함합니다.
@@ -183,14 +200,19 @@ APP_INCS += $(PULSE_SDK_INCS)
 - `ports/baremetal/pulse_transport_https.c`
 - bundled `libmcu` metrics 관련 필수 소스
 
+이미 프로젝트에서 cbor을 별도로 빌드하고 있다면, `PULSE_SDK_SRCS` 대신
+`PULSE_SDK_CORE_SRCS`를 사용하도록 변경하세요
+이렇게 하면 기존의 cbor 관리 방식을 그대로 유지할 수 있습니다.
+
+```make
+APP_SRCS += $(PULSE_SDK_CORE_SRCS)
+APP_SRCS += $(YOUR_CBOR_SRCS)
+APP_INCS += $(PULSE_SDK_INCS)
+```
+
 Baremetal Make 통합을 CoAPS로 바꾸려면,
 `ports/baremetal/pulse_transport_https.c` 대신
 `ports/baremetal/pulse_transport_coaps.c`를 빌드에 직접 추가하면 됩니다.
-
-> [!IMPORTANT]
-> 외부 `LIBMCU_ROOT`를 지정한 경우(번들로 제공되는 `external/libmcu`가 아닌 경우),
-> Make 통합은 metrics 소스, 플랫폼 오버라이드, 전송 모듈을 자동으로 추가하지 않습니다.
-> 빌드에 직접 추가해야 합니다.
 
 ## 메트릭 API
 ### 메트릭 정의 매크로
@@ -228,6 +250,10 @@ Baremetal Make 통합을 CoAPS로 바꾸려면,
 Pulse SDK는 [libmcu](https://github.com/libmcu/libmcu)와
 [cbor](https://github.com/libmcu/cbor)에 의존합니다.
 
+- `libmcu`는 public 의존성임. `pulse/pulse.h`가 libmcu metrics 타입을 노출하고,
+  애플리케이션도 `metrics_*()` API를 직접 호출하는 사용 방식을 전제로 함.
+- `cbor`는 internal 의존성임. Pulse SDK가 private하게 빌드에 포함하며 public API로 노출하지 않음.
+
 CMake 통합 시 의존성 루트는 아래 순서로 해석됩니다.
 
 1. `PULSE_SDK_LIBMCU_ROOT` / `PULSE_SDK_CBOR_ROOT`
@@ -249,13 +275,12 @@ Make 통합 시 `pulse-sdk.mk`는 아래 순서로 의존성을 해석합니다.
 
 > [!IMPORTANT]
 > `PULSE_SDK_LIBMCU_ROOT` 또는 `LIBMCU_ROOT`가 외부 libmcu 루트
-> (번들로 제공되는 `external/libmcu`가 아닌 경로)를 가리키는 경우,
-> `pulse_sdk_collect()`는 metrics 코어 소스, 플랫폼 오버라이드, 전송 모듈을
-> 자동으로 추가하지 않습니다. 아래 소스를 빌드 대상에 직접 추가해야 합니다.
+> (번들 `external/libmcu`가 아닌 경로)를 가리키는 경우에도,
+> `pulse_sdk_collect()`는 Pulse SDK 소유 플랫폼 오버라이드 및 전송 모듈은 자동 추가함.
+> 사용자는 아래 libmcu 구현이 최종 애플리케이션에 링크되도록만 보장하면 됨.
+> 기존 libmcu target/library를 그대로 써도 되고, 필요 시 아래 소스를 직접 추가해도 됨.
 >
 > - `<libmcu>/modules/metrics/src/metrics.c`
 > - `<libmcu>/modules/metrics/src/metricfs.c`
 > - `<libmcu>/modules/common/src/assert.c`
 > - `<libmcu>/modules/common/src/base64.c` (`PULSE_SDK_TRANSPORT=coaps` 사용 시)
-> - `ports/<platform>/pulse_overrides.c`
-> - `ports/<platform>/pulse_transport_<transport>.c`
