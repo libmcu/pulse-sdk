@@ -54,6 +54,7 @@ typedef struct {
 	response_buf_t response;
 	coaps_state_t state;
 	const struct pulse_report_ctx *rctx;
+	bool coap_started;
 } coaps_session_t;
 
 static coaps_session_t m_session;
@@ -258,6 +259,10 @@ static void cleanup_session(coaps_session_t *s)
 		coap_free_context(s->ctx);
 		s->ctx = NULL;
 	}
+	if (s->coap_started) {
+		coap_cleanup();
+		s->coap_started = false;
+	}
 	s->state = STATE_IDLE;
 	s->rctx = NULL;
 }
@@ -388,7 +393,6 @@ static int advance_session(coaps_session_t *s, bool async,
 void pulse_transport_cancel(void)
 {
 	cleanup_session(&m_session);
-	coap_cleanup();
 }
 
 int pulse_transport_transmit(const void *data, size_t datasize,
@@ -412,9 +416,9 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 
 	if (m_session.state == STATE_IDLE) {
 		coap_startup();
+		m_session.coap_started = true;
 		int ret = start_session(&m_session, data, datasize, ctx);
 		if (ret != 0) {
-			coap_cleanup();
 			return ret;
 		}
 	}
