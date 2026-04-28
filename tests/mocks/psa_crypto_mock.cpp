@@ -12,6 +12,7 @@ extern "C" {
 
 static struct {
 	psa_status_t result;
+	psa_status_t init_result;
 	uint8_t digest[32];
 	uint8_t last_input[256];
 	size_t last_input_len;
@@ -32,6 +33,11 @@ extern "C" void psa_crypto_mock_set_result(psa_status_t result)
 	g_state.result = result;
 }
 
+extern "C" void psa_crypto_mock_set_init_result(psa_status_t result)
+{
+	g_state.init_result = result;
+}
+
 extern "C" void psa_crypto_mock_set_digest(const uint8_t *digest, size_t len)
 {
 	if (len > sizeof(g_state.digest)) {
@@ -48,6 +54,11 @@ extern "C" size_t psa_crypto_mock_last_input_len(void)
 extern "C" const uint8_t *psa_crypto_mock_last_input(void)
 {
 	return g_state.last_input;
+}
+
+extern "C" psa_status_t psa_crypto_init(void)
+{
+	return g_state.init_result;
 }
 
 extern "C" psa_status_t psa_hash_compute(psa_algorithm_t alg,

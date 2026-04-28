@@ -78,10 +78,18 @@ static int compute_psk_identity(char buf[static PSK_IDENTITY_BUFSIZE],
 #if MBEDTLS_VERSION_NUMBER >= 0x04000000
 	size_t digest_len;
 
+	if (psa_crypto_init() != PSA_SUCCESS) {
+		return -EIO;
+	}
+
 	if (psa_hash_compute(PSA_ALG_SHA_256,
 				(const uint8_t *)token, strlen(token),
 				digest, sizeof(digest),
 				&digest_len) != PSA_SUCCESS) {
+		return -EIO;
+	}
+
+	if (digest_len != sizeof(digest)) {
 		return -EIO;
 	}
 #else
