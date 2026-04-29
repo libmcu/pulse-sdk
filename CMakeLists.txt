@@ -42,8 +42,6 @@ if(COMMAND idf_component_register)
 	target_compile_features(${COMPONENT_LIB} PRIVATE c_std_99)
 	target_compile_definitions(${COMPONENT_LIB} PUBLIC ${PULSE_PUBLIC_DEFS})
 	target_link_libraries(${COMPONENT_LIB} PUBLIC ${PULSE_PUBLIC_LINKS})
-	target_link_options(${COMPONENT_LIB} INTERFACE
-		"LINKER:-u,pulse_metrics_cbor_encoder_link_anchor")
 
 	if(NOT DEFINED METRICS_USER_DEFINES AND DEFINED PROJECT_DIR AND
 			EXISTS "${PROJECT_DIR}/main/metrics.def")

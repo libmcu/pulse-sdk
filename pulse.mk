@@ -43,8 +43,6 @@ PULSE_CORE_SRCS := \
 
 PULSE_CBOR_SRCS := $(CBOR_SRCS)
 
-PULSE_LDFLAGS ?= -Wl,-u,pulse_metrics_cbor_encoder_link_anchor
-
 # NOTE: pulse's own baremetal overrides and default HTTPS transport are
 # always exported through PULSE_CORE_SRCS. Additional libmcu runtime
 # sources are collected automatically only when LIBMCU_ROOT resolves to the

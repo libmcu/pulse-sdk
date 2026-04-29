@@ -15,7 +15,6 @@ if(CONFIG_PULSE)
 	zephyr_include_directories(${PULSE_PUBLIC_INCS})
 	zephyr_library_include_directories(${PULSE_PUBLIC_INCS}
 		${PULSE_PRIVATE_INCS})
-	zephyr_ld_options(-u pulse_metrics_cbor_encoder_link_anchor)
 
 	if(CONFIG_PULSE_METRICS_USER_DEFINES)
 		set(_pulse_metrics_defines_path
