@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2026 권경환 Kyunghwan Kwon <k@libmcu.org>
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include "CppUTest/TestHarness.h"
 
 extern "C" {
@@ -12,6 +18,13 @@ extern "C" {
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
 }
+
+/*
+ * base64url("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") = 32 zero bytes
+ * 43자 base64url 문자열, 스펙 §5.2의 유효한 토큰 형식에 해당함.
+ */
+#define VALID_TOKEN	"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+#define VALID_TOKEN_PSK_LEN	32u
 
 static struct pulse_report_ctx g_ctx;
 static uint8_t g_response_buf[8192];
@@ -42,7 +55,7 @@ TEST_GROUP(PulseTransportCoapsEspIdf)
 
 TEST(PulseTransportCoapsEspIdf, ShouldReturnInvalidArgumentWhenPayloadIsNull)
 {
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 
 	CHECK_EQUAL(-EINVAL, pulse_transport_transmit(NULL, 1u, &g_ctx));
 }
@@ -51,7 +64,7 @@ TEST(PulseTransportCoapsEspIdf, ShouldReturnInvalidArgumentWhenDataSizeIsZero)
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 
 	CHECK_EQUAL(-EINVAL,
 			pulse_transport_transmit(payload, 0u, &g_ctx));
@@ -61,18 +74,37 @@ TEST(PulseTransportCoapsEspIdf, ShouldReturnOverflowWhenPayloadExceedsIntMax)
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 
 	CHECK_EQUAL(-EOVERFLOW,
 			pulse_transport_transmit(payload,
 					(size_t)INT_MAX + 1u, &g_ctx));
 }
 
+TEST(PulseTransportCoapsEspIdf, ShouldReturnInvalidArgumentWhenTokenIsMissing)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	CHECK_EQUAL(-EINVAL,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+}
+
+TEST(PulseTransportCoapsEspIdf,
+		ShouldReturnInvalidArgumentWhenTokenIsNotValidBase64Url)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	g_ctx.conf.token = "not-a-valid-base64url-token";
+
+	CHECK_EQUAL(-EINVAL,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+}
+
 TEST(PulseTransportCoapsEspIdf, ShouldReturnInProgressWhenAsyncAndNotYetDone)
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 	g_ctx.conf.async_transport = true;
 	coap_mock_suppress_response();
 
@@ -85,7 +117,7 @@ TEST(PulseTransportCoapsEspIdf,
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 	g_ctx.conf.async_transport = true;
 	coap_mock_suppress_response();
 
@@ -101,7 +133,7 @@ TEST(PulseTransportCoapsEspIdf,
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 	g_ctx.conf.async_transport = true;
 	coap_mock_suppress_response();
 
@@ -114,19 +146,11 @@ TEST(PulseTransportCoapsEspIdf,
 			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
 }
 
-TEST(PulseTransportCoapsEspIdf, ShouldReturnInvalidArgumentWhenTokenIsMissing)
-{
-	static const uint8_t payload[] = { 0x01 };
-
-	CHECK_EQUAL(-EINVAL,
-			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
-}
-
 TEST(PulseTransportCoapsEspIdf, ShouldReturnIoErrorWhenSha256Fails)
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 	psa_crypto_mock_set_result(PSA_ERROR_GENERIC_ERROR);
 
 	CHECK_EQUAL(-EIO,
@@ -137,7 +161,7 @@ TEST(PulseTransportCoapsEspIdf, ShouldReturnNoMemoryWhenContextCreationFails)
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 	coap_mock_set_context_result(NULL);
 
 	CHECK_EQUAL(-ENOMEM,
@@ -149,7 +173,7 @@ TEST(PulseTransportCoapsEspIdf,
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 	coap_mock_set_resolve_result(0);
 
 	CHECK_EQUAL(-EHOSTUNREACH,
@@ -160,7 +184,7 @@ TEST(PulseTransportCoapsEspIdf, ShouldReturnIoErrorWhenSessionCreationFails)
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 	coap_mock_set_session_result(NULL);
 
 	CHECK_EQUAL(-EIO,
@@ -168,12 +192,13 @@ TEST(PulseTransportCoapsEspIdf, ShouldReturnIoErrorWhenSessionCreationFails)
 }
 
 TEST(PulseTransportCoapsEspIdf,
-		ShouldConfigureDtlsSessionWithDerivedIdentityAndRawTokenKey)
+		ShouldConfigureDtlsSessionWithDerivedIdentityAndBase64DecodedTokenKey)
 {
 	static const uint8_t payload[] = { 0xaa, 0xbb, 0xcc };
 	static const uint8_t response[] = { 0x01, 0x02, 0x03 };
+	static const uint8_t expected_psk[VALID_TOKEN_PSK_LEN] = { 0 };
 
-	g_ctx.conf.token = "token-123";
+	g_ctx.conf.token = VALID_TOKEN;
 	g_ctx.conf.transmit_timeout_ms = 5000u;
 	g_ctx.on_response = on_response;
 	coap_mock_set_response_payload(response, sizeof(response), 0u,
@@ -185,7 +210,9 @@ TEST(PulseTransportCoapsEspIdf,
 	STRCMP_EQUAL("ingest.libmcu.org", coap_mock_last_client_sni());
 	STRCMP_EQUAL("000102030405060708090a0b0c0d0e0f",
 			coap_mock_last_psk_identity());
-	STRCMP_EQUAL("token-123", coap_mock_last_psk_key());
+	/* PSK = base64url_decode(token) = 32 zero bytes (스펙 §5.2) */
+	CHECK_EQUAL((int)VALID_TOKEN_PSK_LEN, (int)coap_mock_last_psk_key_len());
+	MEMCMP_EQUAL(expected_psk, coap_mock_last_psk_key(), VALID_TOKEN_PSK_LEN);
 	STRCMP_EQUAL("v1", coap_mock_last_uri_path());
 	CHECK_EQUAL(COAP_MEDIATYPE_APPLICATION_CBOR,
 			(int)coap_mock_last_content_format());
@@ -195,18 +222,18 @@ TEST(PulseTransportCoapsEspIdf,
 }
 
 TEST(PulseTransportCoapsEspIdf,
-		ShouldPassRawTokenBytesAsSha256InputForIdentityDerivation)
+		ShouldPassRawTokenStringAsSha256InputForIdentityDerivation)
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "token-123";
+	g_ctx.conf.token = VALID_TOKEN;
 
 	pulse_transport_transmit(payload, sizeof(payload), &g_ctx);
 
-	CHECK_EQUAL(strlen("token-123"),
+	CHECK_EQUAL(strlen(VALID_TOKEN),
 			(int)psa_crypto_mock_last_input_len());
-	MEMCMP_EQUAL("token-123", psa_crypto_mock_last_input(),
-			strlen("token-123"));
+	MEMCMP_EQUAL(VALID_TOKEN, psa_crypto_mock_last_input(),
+			strlen(VALID_TOKEN));
 }
 
 TEST(PulseTransportCoapsEspIdf,
@@ -214,7 +241,7 @@ TEST(PulseTransportCoapsEspIdf,
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 
 	pulse_transport_transmit(payload, sizeof(payload), &g_ctx);
 
@@ -225,21 +252,32 @@ TEST(PulseTransportCoapsEspIdf, ShouldReturnTimeoutOnNackTooManyRetries)
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 	coap_mock_set_send_recv_result(-5);
 
 	CHECK_EQUAL(-ETIMEDOUT,
 			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
 }
 
-TEST(PulseTransportCoapsEspIdf, ShouldReturnCancelledOnNackNotDeliverable)
+TEST(PulseTransportCoapsEspIdf, ShouldReturnProtoErrorOnNackTlsFailed)
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
+	coap_mock_set_send_recv_result(-7);
+
+	CHECK_EQUAL(-EPROTO,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+}
+
+TEST(PulseTransportCoapsEspIdf, ShouldReturnIoErrorOnNackNotDeliverable)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	g_ctx.conf.token = VALID_TOKEN;
 	coap_mock_set_send_recv_result(-6);
 
-	CHECK_EQUAL(-ECANCELED,
+	CHECK_EQUAL(-EIO,
 			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
 }
 
@@ -249,7 +287,7 @@ TEST(PulseTransportCoapsEspIdf,
 	static const uint8_t payload[] = { 0x01 };
 	static const char error_body[] = "invalid_token";
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 	coap_mock_set_response_code((coap_pdu_code_t)129); /* 4.01 Unauthorized */
 	coap_mock_set_response_payload(error_body, strlen(error_body), 0u,
 			strlen(error_body));
@@ -265,7 +303,7 @@ TEST(PulseTransportCoapsEspIdf,
 	static uint8_t large_response[5000];
 
 	memset(large_response, 0x5a, sizeof(large_response));
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 	coap_mock_set_response_payload(large_response, sizeof(large_response),
 			0u, sizeof(large_response));
 
@@ -278,7 +316,7 @@ TEST(PulseTransportCoapsEspIdf, ShouldDeliverResponseBodyToRegisteredHandler)
 	static const uint8_t payload[] = { 0x01 };
 	static const uint8_t response[] = { 0xA1, 0x01, 0x02 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 	g_ctx.on_response = on_response;
 	coap_mock_set_response_payload(response, sizeof(response), 0u,
 			sizeof(response));
@@ -294,7 +332,7 @@ TEST(PulseTransportCoapsEspIdf,
 {
 	static const uint8_t payload[] = { 0x01 };
 
-	g_ctx.conf.token = "test-token";
+	g_ctx.conf.token = VALID_TOKEN;
 	g_ctx.on_response = on_response;
 
 	CHECK_EQUAL(0,

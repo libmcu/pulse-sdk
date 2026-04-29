@@ -37,7 +37,11 @@ int main(void)
 {
 	memset(&loopback, 0, sizeof(loopback));
 
-	struct pulse conf = { .token = "example-token" };
+	struct pulse conf = {
+		.token = "example-token",
+		.serial_number = "generic-device-1",
+		.software_version = "1.0.0",
+	};
 	if (pulse_init(&conf) != PULSE_STATUS_OK) {
 		return 1;
 	}

@@ -263,6 +263,8 @@ static pulse_status_t map_metrics_report_error(int err)
 		return PULSE_STATUS_BACKLOG_PENDING;
 	case -ECANCELED:
 		return PULSE_STATUS_OK;
+	case -EPROTO:
+		return PULSE_STATUS_IO;
 	case -EINPROGRESS:
 		return PULSE_STATUS_IN_PROGRESS;
 	case -ETIMEDOUT:

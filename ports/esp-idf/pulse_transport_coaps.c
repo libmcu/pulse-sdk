@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "pulse/pulse.h"
+#include "pulse/pulse_internal.h"
+
 #include <errno.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -20,13 +23,13 @@
 #include <mbedtls/sha256.h>
 #endif
 
-#include "pulse/pulse.h"
-#include "pulse/pulse_internal.h"
+#include "libmcu/base64.h"
 
 #define COAPS_TIMEOUT_MS_DEFAULT	15000u
 #define COAPS_RESPONSE_BUFSIZE		4096u
 #define PSK_IDENTITY_HEX_LEN		32u
 #define PSK_IDENTITY_BUFSIZE		(PSK_IDENTITY_HEX_LEN + 1u)
+#define PSK_KEY_LEN			32u
 
 typedef enum {
 	STATE_IDLE,
@@ -109,15 +112,16 @@ static int compute_psk_identity(char buf[static PSK_IDENTITY_BUFSIZE],
 }
 
 static void fill_psk_config(coap_dtls_cpsk_t *psk,
-		const char *identity, const char *token)
+		const char *identity,
+		const uint8_t *psk_key, size_t psk_key_len)
 {
 	memset(psk, 0, sizeof(*psk));
 	psk->version = COAP_DTLS_CPSK_SETUP_VERSION;
 	psk->client_sni = PULSE_INGEST_HOST;
 	psk->psk_info.identity.s = (const uint8_t *)identity;
 	psk->psk_info.identity.length = strlen(identity);
-	psk->psk_info.key.s = (const uint8_t *)token;
-	psk->psk_info.key.length = strlen(token);
+	psk->psk_info.key.s = psk_key;
+	psk->psk_info.key.length = psk_key_len;
 }
 
 static int resolve_server(coap_addr_info_t **info)
@@ -195,9 +199,10 @@ static int map_nack_reason(coap_nack_reason_t reason)
 	case COAP_NACK_TOO_MANY_RETRIES:
 		return -ETIMEDOUT;
 	case COAP_NACK_NOT_DELIVERABLE:
+		return -EIO;
 	case COAP_NACK_TLS_FAILED:
 	case COAP_NACK_TLS_LAYER_FAILED:
-		return -ECANCELED;
+		return -EPROTO;
 	default:
 		return -EIO;
 	}
@@ -280,6 +285,7 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 {
 	const struct pulse *conf = &rctx->conf;
 	char psk_id[PSK_IDENTITY_BUFSIZE];
+	uint8_t psk_key[PSK_KEY_LEN];
 	coap_dtls_cpsk_t psk;
 	coap_addr_info_t *addr = NULL;
 	coap_pdu_t *pdu = NULL;
@@ -295,6 +301,12 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 		goto fail;
 	}
 
+	if (lm_base64url_decode(psk_key, sizeof(psk_key),
+			conf->token, strlen(conf->token)) != PSK_KEY_LEN) {
+		ret = -EINVAL;
+		goto fail;
+	}
+
 	s->ctx = coap_new_context(NULL);
 	if (s->ctx == NULL) {
 		ret = -ENOMEM;
@@ -306,7 +318,7 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 		goto fail;
 	}
 
-	fill_psk_config(&psk, psk_id, conf->token);
+	fill_psk_config(&psk, psk_id, psk_key, sizeof(psk_key));
 	s->session = coap_new_client_session_psk2(s->ctx, NULL, &addr->addr,
 			COAP_PROTO_DTLS, &psk);
 	coap_free_address_info(addr);

@@ -1,9 +1,14 @@
 COMPONENT_NAME = PulseTransportCoapsEspIdf
 
-LIBMCU_ROOT = ../build/_deps/external_libmcu-src
+LIBMCU_ROOT ?= $(firstword $(wildcard ../build/_deps/libmcu-src ../build/_deps/external_libmcu-src))
+
+ifeq ($(LIBMCU_ROOT),)
+$(error LIBMCU_ROOT not found in ../build/_deps; run CMake configure first)
+endif
 
 SRC_FILES = \
 	../ports/esp-idf/pulse_transport_coaps.c \
+	$(LIBMCU_ROOT)/modules/common/src/base64.c \
 
 TEST_SRC_FILES = \
 	src/pulse_transport_coaps_esp_idf_test.cpp \
