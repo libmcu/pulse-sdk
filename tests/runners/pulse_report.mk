@@ -1,8 +1,16 @@
 COMPONENT_NAME = PulseReport
 
-LIBMCU_ROOT = ../build/_deps/external_libmcu-src
+LIBMCU_ROOT ?= $(firstword $(wildcard ../build/_deps/libmcu-src ../build/_deps/external_libmcu-src))
 
-CBOR_ROOT = ../build/_deps/external_cbor-src
+ifeq ($(LIBMCU_ROOT),)
+$(error LIBMCU_ROOT not found in ../build/_deps; run CMake configure first)
+endif
+
+CBOR_ROOT ?= $(firstword $(wildcard ../build/_deps/cbor-src ../build/_deps/external_cbor-src))
+
+ifeq ($(CBOR_ROOT),)
+$(error CBOR_ROOT not found in ../build/_deps; run CMake configure first)
+endif
 
 include $(CBOR_ROOT)/cbor.mk
 
