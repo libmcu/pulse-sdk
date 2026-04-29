@@ -375,12 +375,21 @@ function(pulse_collect out_srcs out_public_incs out_private_incs)
 			message(FATAL_ERROR "libmcu root not found. Set PULSE_LIBMCU_ROOT or LIBMCU_ROOT, place dependency under external/libmcu, or enable PULSE_FETCH_DEPS.")
 		endif()
 
-		set(LIBMCU_INTERFACES uart kvstore)
-		include(${_PULSE_LIBMCU_RESOLVED_ROOT}/project/interfaces.cmake)
-		list(APPEND _public_incs
-			${LIBMCU_INTERFACES_INCS}
-			${_PULSE_LIBMCU_RESOLVED_ROOT}/modules/common/include
-			${_PULSE_LIBMCU_RESOLVED_ROOT}/modules/metrics/include)
+		if(DEFINED CONFIG_PULSE_LIBMCU AND CONFIG_PULSE_LIBMCU)
+			include(${_PULSE_LIBMCU_RESOLVED_ROOT}/project/interfaces.cmake)
+			include(${_PULSE_LIBMCU_RESOLVED_ROOT}/project/modules.cmake)
+			list(APPEND _srcs ${LIBMCU_MODULES_SRCS})
+			list(APPEND _public_incs
+				${LIBMCU_INTERFACES_INCS}
+				${LIBMCU_MODULES_INCS})
+		else()
+			set(LIBMCU_INTERFACES uart kvstore)
+			include(${_PULSE_LIBMCU_RESOLVED_ROOT}/project/interfaces.cmake)
+			list(APPEND _public_incs
+				${LIBMCU_INTERFACES_INCS}
+				${_PULSE_LIBMCU_RESOLVED_ROOT}/modules/common/include
+				${_PULSE_LIBMCU_RESOLVED_ROOT}/modules/metrics/include)
+		endif()
 	endif()
 
 	if(NOT _reuse_cbor)
@@ -397,7 +406,11 @@ function(pulse_collect out_srcs out_public_incs out_private_incs)
 
 		include(${_PULSE_CBOR_RESOLVED_ROOT}/cbor.cmake)
 		list(APPEND _srcs ${CBOR_SRCS})
-		list(APPEND _private_incs ${CBOR_INCS})
+		if(DEFINED CONFIG_PULSE_CBOR AND CONFIG_PULSE_CBOR)
+			list(APPEND _public_incs ${CBOR_INCS})
+		else()
+			list(APPEND _private_incs ${CBOR_INCS})
+		endif()
 	endif()
 
 	# NOTE: pulse always compiles its own transport/override sources so the
@@ -415,6 +428,7 @@ function(pulse_collect out_srcs out_public_incs out_private_incs)
 	# pulse_metrics_cbor_encoder.c so the strong CBOR encoder is linked even when
 	# libmcu arrives through a separate static archive.
 	if(NOT _reuse_libmcu AND
+			NOT (DEFINED CONFIG_PULSE_LIBMCU AND CONFIG_PULSE_LIBMCU) AND
 			(_PULSE_LIBMCU_RESOLVED_ROOT_SOURCE STREQUAL "bundled" OR
 			_PULSE_LIBMCU_RESOLVED_ROOT_SOURCE STREQUAL "fetched"))
 		list(APPEND _srcs
