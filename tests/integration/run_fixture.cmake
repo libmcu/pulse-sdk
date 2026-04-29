@@ -6,8 +6,8 @@ if(NOT DEFINED TEST_BINARY_DIR)
 	message(FATAL_ERROR "TEST_BINARY_DIR is required")
 endif()
 
-if(NOT DEFINED PULSE_SDK_ROOT)
-	message(FATAL_ERROR "PULSE_SDK_ROOT is required")
+if(NOT DEFINED PULSE_ROOT)
+	message(FATAL_ERROR "PULSE_ROOT is required")
 endif()
 
 set(_configure_args)
@@ -27,7 +27,7 @@ execute_process(
 	COMMAND ${CMAKE_COMMAND}
 		-S ${TEST_SOURCE_DIR}
 		-B ${TEST_BINARY_DIR}
-		-DPULSE_SDK_ROOT=${PULSE_SDK_ROOT}
+		-DPULSE_ROOT=${PULSE_ROOT}
 		${_configure_args}
 	RESULT_VARIABLE _configure_result)
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(pulse_sdk_preexisting_deps_consumer LANGUAGES C)
+project(pulse_preexisting_deps_consumer LANGUAGES C)
 
 include(FetchContent)
 
@@ -16,14 +16,14 @@ FetchContent_Declare(cbor
 	GIT_TAG main)
 FetchContent_MakeAvailable(cbor)
 
-set(PULSE_SDK_TRANSPORT https CACHE STRING "")
+set(PULSE_TRANSPORT https CACHE STRING "")
 
-add_subdirectory(${PULSE_SDK_ROOT} pulse-sdk)
+add_subdirectory(${PULSE_ROOT} pulse)
 
 add_executable(preexisting_deps_consumer
 	main.c)
 
 target_link_libraries(preexisting_deps_consumer PRIVATE
-	pulse-sdk
+	pulse
 	libmcu
 	cbor)

@@ -1,17 +1,17 @@
-PULSE_SDK_ROOT ?= ../..
-LIBMCU_ROOT   ?= $(PULSE_SDK_ROOT)/external/libmcu
-CBOR_ROOT     ?= $(PULSE_SDK_ROOT)/external/cbor
+PULSE_ROOT ?= ../..
+LIBMCU_ROOT   ?= $(PULSE_ROOT)/external/libmcu
+CBOR_ROOT     ?= $(PULSE_ROOT)/external/cbor
 
-include $(PULSE_SDK_ROOT)/pulse-sdk.mk
+include $(PULSE_ROOT)/pulse.mk
 
 CC      ?= gcc
-CPPFLAGS += $(addprefix -I,$(PULSE_SDK_INCS)) \
-	    -I$(PULSE_SDK_ROOT)/examples \
+CPPFLAGS += $(addprefix -I,$(PULSE_INCS)) \
+	    -I$(PULSE_ROOT)/examples \
 	    -DMETRICS_USER_DEFINES=\"metrics.def\"
 CFLAGS  += -std=c99 -Wall -Wextra
 LDFLAGS ?=
 
-SRCS := src/main.c src/syscalls.c $(PULSE_SDK_SRCS)
+SRCS := src/main.c src/syscalls.c $(PULSE_SRCS)
 OBJS := $(patsubst %.c,build/%.o,$(SRCS))
 
 .PHONY: all clean

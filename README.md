@@ -64,10 +64,10 @@ DTLS PSK, and the SDK derives the DTLS PSK identity internally.
 
 Platform-specific selection methods:
 
-- **Zephyr**: choose `CONFIG_PULSE_SDK_TRANSPORT_COAPS=y` (default) or
-  `CONFIG_PULSE_SDK_TRANSPORT_HTTPS=y` in `prj.conf`.
+- **Zephyr**: choose `CONFIG_PULSE_TRANSPORT_COAPS=y` (default) or
+  `CONFIG_PULSE_TRANSPORT_HTTPS=y` in `prj.conf`.
 - **ESP-IDF**: choose the transport in `menuconfig`.
-- **Generic CMake / Linux**: set `PULSE_SDK_TRANSPORT` before adding the SDK
+- **Generic CMake / Linux**: set `PULSE_TRANSPORT` before adding the SDK
   subdirectory.
 - **Baremetal Make**: the Make integration auto-adds the HTTPS
   transport only. To use CoAPS, add the CoAPS transport source manually.
@@ -80,23 +80,23 @@ in your manifest:
 ```yaml
 manifest:
   projects:
-    - name: pulse-sdk
+    - name: pulse
       url: https://github.com/libmcu/pulse-sdk.git
       revision: main
-      path: modules/lib/pulse-sdk
+      path: modules/lib/pulse
 ```
 
 Enable the module in `prj.conf`:
 
 ```conf
-CONFIG_PULSE_SDK=y
-CONFIG_PULSE_SDK_TRANSPORT_COAPS=y
-#CONFIG_PULSE_SDK_TRANSPORT_HTTPS=y
-#CONFIG_PULSE_SDK_METRICS_USER_DEFINES=/path/to/metrics.def
+CONFIG_PULSE=y
+CONFIG_PULSE_TRANSPORT_COAPS=y
+#CONFIG_PULSE_TRANSPORT_HTTPS=y
+#CONFIG_PULSE_METRICS_USER_DEFINES=/path/to/metrics.def
 ```
 
 > [!NOTE]
-> The path to the metric definition file is set by `CONFIG_PULSE_SDK_METRICS_USER_DEFINES`.
+> The path to the metric definition file is set by `CONFIG_PULSE_METRICS_USER_DEFINES`.
 > The default value is `include/metrics.def`.
 
 ### ESP-IDF
@@ -105,14 +105,14 @@ Clone or add as a git submodule under your project's `components/` directory:
 
 ```bash
 cd components
-git submodule add https://github.com/libmcu/pulse-sdk.git pulse-sdk
+git submodule add https://github.com/libmcu/pulse-sdk.git pulse
 ```
 
 Select the transport in `menuconfig`:
 
 ```text
 Component config  --->
-  Pulse SDK  --->
+  Pulse  --->
     (X) CoAPS (CoAP over DTLS PSK)
     ( ) HTTPS
 ```
@@ -128,22 +128,22 @@ Add Pulse SDK as a subdirectory and link it to your target.
 
 ```cmake
 set(METRICS_USER_DEFINES "${CMAKE_CURRENT_SOURCE_DIR}/metrics.def")
-set(PULSE_SDK_TRANSPORT coaps CACHE STRING "") # default
-# set(PULSE_SDK_TRANSPORT https CACHE STRING "")
+set(PULSE_TRANSPORT coaps CACHE STRING "") # default
+# set(PULSE_TRANSPORT https CACHE STRING "")
 
-add_subdirectory(path/to/pulse-sdk)
-target_link_libraries(your_target PRIVATE pulse-sdk)
+add_subdirectory(path/to/pulse)
+target_link_libraries(your_target PRIVATE pulse)
 ```
 
 If dependency roots are not discoverable from your project layout, set them explicitly before adding the subdirectory:
 
 ```cmake
-set(PULSE_SDK_LIBMCU_ROOT /path/to/libmcu)
-set(PULSE_SDK_CBOR_ROOT /path/to/cbor)
+set(PULSE_LIBMCU_ROOT /path/to/libmcu)
+set(PULSE_CBOR_ROOT /path/to/cbor)
 set(METRICS_USER_DEFINES "${CMAKE_CURRENT_SOURCE_DIR}/metrics.def")
 
-add_subdirectory(path/to/pulse-sdk)
-target_link_libraries(your_target PRIVATE pulse-sdk)
+add_subdirectory(path/to/pulse)
+target_link_libraries(your_target PRIVATE pulse)
 ```
 
 If your application already builds and links `libmcu` on its own, keep doing so.
@@ -156,13 +156,13 @@ cloning and linking a second `libmcu` copy:
 
 ```cmake
 target_link_libraries(your_target PRIVATE
-	pulse-sdk
-	pulse::dep::libmcu)
+	pulse
+	pulse::libmcu)
 ```
 
 ### Linux
 
-On Linux, `pulse_sdk_collect()` adds:
+On Linux, `pulse_collect()` adds:
 
 - `ports/linux/pulse_overrides.c`
 - `ports/linux/pulse_transport_<transport>.c`
@@ -171,43 +171,43 @@ Basic integration is the same as generic CMake:
 
 ```cmake
 set(METRICS_USER_DEFINES "${CMAKE_CURRENT_SOURCE_DIR}/metrics.def")
-set(PULSE_SDK_TRANSPORT coaps CACHE STRING "") # default
-# set(PULSE_SDK_TRANSPORT https CACHE STRING "")
+set(PULSE_TRANSPORT coaps CACHE STRING "") # default
+# set(PULSE_TRANSPORT https CACHE STRING "")
 
-add_subdirectory(path/to/pulse-sdk)
+add_subdirectory(path/to/pulse)
 add_executable(app main.c)
-target_link_libraries(app PRIVATE pulse-sdk)
+target_link_libraries(app PRIVATE pulse)
 ```
 
 ### Baremetal
 
-For Make-based baremetal projects, include `pulse-sdk.mk` and append the exported source and include lists.
+For Make-based baremetal projects, include `pulse.mk` and append the exported source and include lists.
 
 ```make
-PULSE_SDK_ROOT ?= path/to/pulse-sdk
+PULSE_ROOT ?= path/to/pulse
 LIBMCU_ROOT ?= path/to/libmcu
 CBOR_ROOT ?= path/to/cbor
 
-include $(PULSE_SDK_ROOT)/pulse-sdk.mk
+include $(PULSE_ROOT)/pulse.mk
 
-APP_SRCS += $(PULSE_SDK_SRCS)
-APP_INCS += $(PULSE_SDK_INCS)
-# LDFLAGS += $(PULSE_SDK_LDFLAGS)  # only needed if you archive Pulse SDK separately
+APP_SRCS += $(PULSE_SRCS)
+APP_INCS += $(PULSE_INCS)
+# LDFLAGS += $(PULSE_LDFLAGS)  # only needed if you archive Pulse SDK separately
 ```
 
-When `LIBMCU_ROOT` resolves to `$(PULSE_SDK_ROOT)/external/libmcu`, the Make integration also pulls in:
+When `LIBMCU_ROOT` resolves to `$(PULSE_ROOT)/external/libmcu`, the Make integration also pulls in:
 
 - `ports/baremetal/pulse_overrides.c`
 - `ports/baremetal/pulse_transport_https.c`
 - required bundled `libmcu` metrics sources
 
-If your project already builds `cbor` separately, switch from `PULSE_SDK_SRCS`
-to `PULSE_SDK_CORE_SRCS` and keep your existing `cbor` ownership:
+If your project already builds `cbor` separately, switch from `PULSE_SRCS`
+to `PULSE_CORE_SRCS` and keep your existing `cbor` ownership:
 
 ```make
-APP_SRCS += $(PULSE_SDK_CORE_SRCS)
+APP_SRCS += $(PULSE_CORE_SRCS)
 APP_SRCS += $(YOUR_CBOR_SRCS)
-APP_INCS += $(PULSE_SDK_INCS)
+APP_INCS += $(PULSE_INCS)
 ```
 
 To switch the baremetal Make integration to CoAPS, remove
@@ -258,14 +258,14 @@ Pulse SDK depends on
 
 When CMake integration is used, dependency roots are resolved in this order:
 
-1. `PULSE_SDK_LIBMCU_ROOT` / `PULSE_SDK_CBOR_ROOT`
+1. `PULSE_LIBMCU_ROOT` / `PULSE_CBOR_ROOT`
 2. `LIBMCU_ROOT` / `CBOR_ROOT`
 3. `external/libmcu` / `external/cbor`
 4. standalone CMake fetch fallback
 
-When Make integration is used, `pulse-sdk.mk` resolves dependencies through:
+When Make integration is used, `pulse.mk` resolves dependencies through:
 
-1. `PULSE_SDK_LIBMCU_ROOT` / `PULSE_SDK_CBOR_ROOT`
+1. `PULSE_LIBMCU_ROOT` / `PULSE_CBOR_ROOT`
 2. `LIBMCU_ROOT` / `CBOR_ROOT`
 3. `external/libmcu` / `external/cbor`
 
@@ -276,8 +276,8 @@ Your application must provide required Pulse metadata directly via `struct pulse
 - `software_version`
 
 > [!IMPORTANT]
-> When `PULSE_SDK_LIBMCU_ROOT` or `LIBMCU_ROOT` points to an external libmcu root
-> (i.e. not the bundled `external/libmcu`), `pulse_sdk_collect()` still adds
+> When `PULSE_LIBMCU_ROOT` or `LIBMCU_ROOT` points to an external libmcu root
+> (i.e. not the bundled `external/libmcu`), `pulse_collect()` still adds
 > Pulse SDK's own platform override and transport sources automatically.
 > You only need to ensure the following libmcu implementation is linked into the
 > final application, either from your existing libmcu target/library or by
@@ -286,4 +286,4 @@ Your application must provide required Pulse metadata directly via `struct pulse
 > - `<libmcu>/modules/metrics/src/metrics.c`
 > - `<libmcu>/modules/metrics/src/metricfs.c`
 > - `<libmcu>/modules/common/src/assert.c`
-> - `<libmcu>/modules/common/src/base64.c` (when `PULSE_SDK_TRANSPORT=coaps`)
+> - `<libmcu>/modules/common/src/base64.c` (when `PULSE_TRANSPORT=coaps`)

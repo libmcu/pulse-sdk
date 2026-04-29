@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MIT
 
-menu "Pulse SDK"
+menu "Pulse"
 
-choice PULSE_SDK_TRANSPORT
+choice PULSE_TRANSPORT
 	prompt "Transport protocol"
-	default PULSE_SDK_TRANSPORT_COAPS
+	default PULSE_TRANSPORT_COAPS
 	help
 	  Select the transport used to send metrics to the ingest server.
 
-config PULSE_SDK_TRANSPORT_COAPS
+config PULSE_TRANSPORT_COAPS
 	bool "CoAPS (CoAP over DTLS PSK)"
 	select COAP_CLIENT_SUPPORT
 	select MBEDTLS_SSL_PROTO_DTLS
@@ -18,11 +18,25 @@ config PULSE_SDK_TRANSPORT_COAPS
 	  Send metrics over CoAP with DTLS PSK authentication.
 	  The authentication token supplied to pulse_init() is used as the PSK.
 
-config PULSE_SDK_TRANSPORT_HTTPS
+config PULSE_TRANSPORT_HTTPS
 	bool "HTTPS"
 	help
 	  Send metrics over HTTPS over TLS.
 
 endchoice
+
+config PULSE_LIBMCU
+	bool "Enable additional libmcu modules"
+	default n
+	help
+	  Build and expose additional libmcu modules (retry, ratelim, etc.)
+	  beyond the metrics modules that Pulse requires internally.
+
+config PULSE_CBOR
+	bool "Enable cbor API access"
+	default n
+	help
+	  Expose the cbor library headers so the application can use
+	  cbor encoding/decoding directly.
 
 endmenu
