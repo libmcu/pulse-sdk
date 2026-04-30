@@ -197,6 +197,65 @@ TEST(PulseTransportCoapsZephyr, ShouldReturnTimeoutWhenNoResponseArrives)
 			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
 }
 
+TEST(PulseTransportCoapsZephyr,
+		ShouldReturnOverflowWhenTransmitTimeoutTooLarge)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	g_ctx.conf.token = VALID_TOKEN;
+	g_ctx.conf.transmit_timeout_ms = (uint32_t)INT32_MAX + 1u;
+
+	CHECK_EQUAL(-EOVERFLOW,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+}
+
+TEST(PulseTransportCoapsZephyr, ShouldReturnIoWhenPollFails)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	g_ctx.conf.token = VALID_TOKEN;
+	zephyr_socket_mock_set_poll_result(-1);
+
+	CHECK_EQUAL(-EIO,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+}
+
+TEST(PulseTransportCoapsZephyr, ShouldReturnIoWhenPollReventsContainPollErr)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	g_ctx.conf.token = VALID_TOKEN;
+	zephyr_socket_mock_set_poll_result(1);
+	zephyr_socket_mock_set_poll_revents(ZSOCK_POLLERR);
+
+	CHECK_EQUAL(-EIO,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+}
+
+TEST(PulseTransportCoapsZephyr, ShouldReturnConnectionResetWhenPollReventsContainPollHup)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	g_ctx.conf.token = VALID_TOKEN;
+	zephyr_socket_mock_set_poll_result(1);
+	zephyr_socket_mock_set_poll_revents(ZSOCK_POLLHUP);
+
+	CHECK_EQUAL(-ECONNRESET,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+}
+
+TEST(PulseTransportCoapsZephyr, ShouldReturnIoWhenPollReventsContainPollNval)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	g_ctx.conf.token = VALID_TOKEN;
+	zephyr_socket_mock_set_poll_result(1);
+	zephyr_socket_mock_set_poll_revents(ZSOCK_POLLNVAL);
+
+	CHECK_EQUAL(-EIO,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+}
+
 TEST(PulseTransportCoapsZephyr, ShouldReturnIoWhenResponseCodeIsFailure)
 {
 	static const uint8_t payload[] = { 0x01 };

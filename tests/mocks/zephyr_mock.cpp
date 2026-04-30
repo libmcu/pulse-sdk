@@ -37,6 +37,7 @@ static struct {
 	int send_error;
 	int recv_error;
 	int poll_result;
+	int poll_revents;
 } g_socket_state;
 
 static struct {
@@ -104,6 +105,7 @@ void zephyr_http_mock_reset(void)
 {
 	memset(&g_response, 0, sizeof(g_response));
 	memset(&g_socket_state, 0, sizeof(g_socket_state));
+	g_socket_state.poll_revents = -1;
 	memset(&g_tls_state, 0, sizeof(g_tls_state));
 	memset(&g_fake_addr, 0, sizeof(g_fake_addr));
 	memset(&g_fake_addrinfo, 0, sizeof(g_fake_addrinfo));
@@ -146,6 +148,11 @@ void zephyr_socket_mock_set_recv_error(int err)
 void zephyr_socket_mock_set_poll_result(int result)
 {
 	g_socket_state.poll_result = result;
+}
+
+void zephyr_socket_mock_set_poll_revents(int revents)
+{
+	g_socket_state.poll_revents = revents;
 }
 
 void zephyr_socket_mock_set_recv_data(const void *data, size_t len)
@@ -386,13 +393,17 @@ extern "C" int zsock_poll(struct zsock_pollfd *fds, int nfds, int timeout)
 
 	if (g_socket_state.poll_result > 0) {
 		for (int i = 0; i < nfds; i++) {
-			fds[i].revents = ZSOCK_POLLIN;
+			fds[i].revents = (short)(g_socket_state.poll_revents >= 0
+					? g_socket_state.poll_revents : ZSOCK_POLLIN);
 		}
 		return g_socket_state.poll_result;
 	}
 
 	for (int i = 0; i < nfds; i++) {
 		fds[i].revents = g_socket_state.recv_pending ? ZSOCK_POLLIN : 0;
+		if (g_socket_state.poll_revents >= 0) {
+			fds[i].revents = (short)g_socket_state.poll_revents;
+		}
 	}
 
 	return g_socket_state.recv_pending ? 1 : 0;

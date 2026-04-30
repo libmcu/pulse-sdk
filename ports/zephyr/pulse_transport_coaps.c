@@ -55,13 +55,19 @@ static coaps_session_t m_session = {
 	.sock = -1,
 };
 
-static uint32_t get_timeout_ms(const struct pulse *conf)
+static int get_timeout_ms(const struct pulse *conf, int32_t *timeout_ms)
 {
 	if (conf != NULL && conf->transmit_timeout_ms > 0u) {
-		return conf->transmit_timeout_ms;
+		if (conf->transmit_timeout_ms > (uint32_t)INT32_MAX) {
+			return -EOVERFLOW;
+		}
+
+		*timeout_ms = (int32_t)conf->transmit_timeout_ms;
+		return 0;
 	}
 
-	return PULSE_COAPS_TIMEOUT_MS_DEFAULT;
+	*timeout_ms = (int32_t)PULSE_COAPS_TIMEOUT_MS_DEFAULT;
+	return 0;
 }
 
 static void reset_response(response_buf_t *buf)
@@ -422,7 +428,27 @@ static int receive_response(coaps_session_t *s, int timeout_ms, bool *ready)
 		return -errno;
 	}
 
-	if (ret == 0 || (pfd.revents & ZSOCK_POLLIN) == 0) {
+	if (ret == 0) {
+		*ready = false;
+		return 0;
+	}
+
+	if ((pfd.revents & ZSOCK_POLLERR) != 0u) {
+		*ready = false;
+		return -EIO;
+	}
+
+	if ((pfd.revents & ZSOCK_POLLHUP) != 0u) {
+		*ready = false;
+		return -ECONNRESET;
+	}
+
+	if ((pfd.revents & ZSOCK_POLLNVAL) != 0u) {
+		*ready = false;
+		return -EIO;
+	}
+
+	if ((pfd.revents & ZSOCK_POLLIN) == 0) {
 		*ready = false;
 		return 0;
 	}
@@ -450,6 +476,7 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 	uint16_t request_bufsize = 0u;
 	size_t request_len = 0u;
 	int ret;
+	int32_t timeout_ms;
 
 	reset_response(&s->response);
 	s->rctx = rctx;
@@ -480,7 +507,12 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 		goto out;
 	}
 
-	ret = resolve_and_connect(&s->sock, get_timeout_ms(&rctx->conf));
+	ret = get_timeout_ms(&rctx->conf, &timeout_ms);
+	if (ret < 0) {
+		goto out;
+	}
+
+	ret = resolve_and_connect(&s->sock, (uint32_t)timeout_ms);
 	if (ret < 0) {
 		goto out;
 	}
@@ -531,6 +563,7 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 {
 	bool ready = false;
 	int ret;
+	int32_t timeout_ms;
 
 	if (data == NULL || datasize == 0u) {
 		return -EINVAL;
@@ -552,8 +585,13 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 		}
 	}
 
+	ret = get_timeout_ms(&ctx->conf, &timeout_ms);
+	if (ret < 0) {
+		return finish_session(&m_session, ret);
+	}
+
 	ret = receive_response(&m_session, ctx->conf.async_transport
-			? 0 : (int)get_timeout_ms(&ctx->conf),
+			? 0 : timeout_ms,
 			&ready);
 	if (ret < 0) {
 		return finish_session(&m_session, ret);

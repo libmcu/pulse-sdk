@@ -26,6 +26,9 @@
 
 #define ZSOCK_MSG_DONTWAIT	0x40
 #define ZSOCK_POLLIN		0x0001
+#define ZSOCK_POLLERR		0x0008
+#define ZSOCK_POLLHUP		0x0010
+#define ZSOCK_POLLNVAL		0x0020
 
 #define SOCK_STREAM		NET_SOCK_STREAM
 #define SOCK_DGRAM		NET_SOCK_DGRAM
@@ -71,6 +74,7 @@ void zephyr_socket_mock_set_addrinfo_count(size_t count);
 void zephyr_socket_mock_set_send_error(int err);
 void zephyr_socket_mock_set_recv_error(int err);
 void zephyr_socket_mock_set_poll_result(int result);
+void zephyr_socket_mock_set_poll_revents(int revents);
 void zephyr_socket_mock_set_recv_data(const void *data, size_t len);
 void zephyr_socket_mock_set_recv_pending(int pending);
 void zsock_freeaddrinfo(struct zsock_addrinfo *ai);
