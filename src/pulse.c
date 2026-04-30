@@ -19,6 +19,8 @@
 #include "libmcu/compiler.h"
 #include "libmcu/metrics_overrides.h"
 
+#include "cbor/cbor.h"
+
 #if !defined(PULSE_STATIC_PAYLOAD_BUFSIZE)
 #define PULSE_STATIC_PAYLOAD_BUFSIZE	0u
 #endif
@@ -283,12 +285,13 @@ static pulse_status_t collect_live_payload(uint8_t reason)
 {
 	struct pulse_envelope_ctx ctx;
 	size_t metrics_len;
+	cbor_writer_t writer;
 
 	m.flight_reason = reason;
 	invoke_prepare_chain();
 	set_live_window_bounds();
 
-	metrics_len = metrics_collect(m.flight_buf, m.flight_bufsize);
+	metrics_len = metrics_collect(m.flight_buf, m.flight_bufsize, &writer);
 	if (metrics_len > m.flight_bufsize) {
 		free_flight_buf();
 		return PULSE_STATUS_OVERFLOW;
@@ -407,7 +410,7 @@ static pulse_status_t do_collect(void)
 	size_t payload_len;
 	size_t payload_bufsize;
 
-	payload_len = metrics_collect(NULL, 0u);
+	payload_len = metrics_collect(NULL, 0u, NULL);
 
 	status = derive_payload_bufsize(payload_len, &payload_bufsize);
 	if (status != PULSE_STATUS_OK) {

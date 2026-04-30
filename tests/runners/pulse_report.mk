@@ -17,7 +17,6 @@ include $(CBOR_ROOT)/cbor.mk
 SRC_FILES = \
 	../src/pulse.c \
 	../src/pulse_codec.c \
-	../src/pulse_metrics_cbor_encoder.c \
 	$(CBOR_SRCS) \
 	$(LIBMCU_ROOT)/modules/metrics/src/metrics.c \
 

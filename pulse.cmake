@@ -263,7 +263,6 @@ function(pulse_collect_cmake out_srcs out_public_incs out_private_incs)
 	set(_srcs
 		${PULSE_ROOT}/src/pulse.c
 		${PULSE_ROOT}/src/pulse_codec.c
-		${PULSE_ROOT}/src/pulse_metrics_cbor_encoder.c
 	)
 	set(_public_incs
 		${PULSE_ROOT}/include
@@ -336,7 +335,6 @@ function(pulse_collect out_srcs out_public_incs out_private_incs)
 	set(_srcs
 		${PULSE_ROOT}/src/pulse.c
 		${PULSE_ROOT}/src/pulse_codec.c
-		${PULSE_ROOT}/src/pulse_metrics_cbor_encoder.c
 	)
 	set(_public_incs
 		${PULSE_ROOT}/include
@@ -425,8 +423,6 @@ function(pulse_collect out_srcs out_public_incs out_private_incs)
 	#   - <libmcu>/modules/common/src/assert.c
 	#   - <libmcu>/modules/common/src/base64.c (coaps transport only)
 	# For archive-based platforms, the build system must retain
-	# pulse_metrics_cbor_encoder.c so the strong CBOR encoder is linked even when
-	# libmcu arrives through a separate static archive.
 	if(NOT _reuse_libmcu AND
 			NOT (DEFINED CONFIG_PULSE_LIBMCU AND CONFIG_PULSE_LIBMCU) AND
 			(_PULSE_LIBMCU_RESOLVED_ROOT_SOURCE STREQUAL "bundled" OR

@@ -70,21 +70,7 @@ pulse_collect_cmake(
 	PULSE_PRIVATE_LINKS
 )
 
-set(_pulse_encoder_src "${PULSE_ROOT}/src/pulse_metrics_cbor_encoder.c")
-list(REMOVE_ITEM PULSE_SRCS "${_pulse_encoder_src}")
-
-add_library(pulse_cbor_encoder_obj OBJECT "${_pulse_encoder_src}")
-target_compile_features(pulse_cbor_encoder_obj PRIVATE c_std_99)
-target_link_libraries(pulse_cbor_encoder_obj PRIVATE
-	pulse::libmcu
-	pulse::cbor
-)
-
 add_library(pulse_cbor_encoder INTERFACE)
-target_sources(pulse_cbor_encoder INTERFACE
-	$<TARGET_OBJECTS:pulse_cbor_encoder_obj>
-)
-
 add_library(${PROJECT_NAME} STATIC ${PULSE_SRCS})
 
 target_compile_features(${PROJECT_NAME} PRIVATE c_std_99)
@@ -109,7 +95,7 @@ endif()
 
 if(DEFINED _pulse_metrics_user_defines AND
 		NOT _pulse_metrics_user_defines STREQUAL "")
-	target_compile_definitions(pulse_cbor_encoder_obj PRIVATE
+	target_compile_definitions(${PROJECT_NAME} PRIVATE
 		METRICS_USER_DEFINES="${_pulse_metrics_user_defines}"
 	)
 endif()

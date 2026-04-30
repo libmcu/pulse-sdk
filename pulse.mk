@@ -37,7 +37,6 @@ include $(CBOR_ROOT)/cbor.mk
 PULSE_CORE_SRCS := \
 	$(PULSE_ROOT)/src/pulse.c \
 	$(PULSE_ROOT)/src/pulse_codec.c \
-	$(PULSE_ROOT)/src/pulse_metrics_cbor_encoder.c \
 	$(PULSE_ROOT)/ports/baremetal/pulse_overrides.c \
 	$(PULSE_ROOT)/ports/baremetal/pulse_transport_https.c
 
