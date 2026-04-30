@@ -1,24 +1,24 @@
 # SPDX-License-Identifier: MIT
 
-menuconfig PULSE_SDK
-	bool "pulse-sdk"
+menuconfig PULSE
+	bool "pulse"
 	default y
 	help
-	  Pulse SDK module support.
+	  Pulse module support.
 
-choice PULSE_SDK_TRANSPORT
+choice PULSE_TRANSPORT
 	prompt "Transport protocol"
-	depends on PULSE_SDK
-	default PULSE_SDK_TRANSPORT_COAPS
+	depends on PULSE
+	default PULSE_TRANSPORT_COAPS
 	help
 	  Select the transport used to send metrics to the ingest server.
 
-config PULSE_SDK_TRANSPORT_HTTPS
+config PULSE_TRANSPORT_HTTPS
 	bool "HTTPS"
 	help
 	  Send metrics over HTTPS (TLS over TCP).
 
-config PULSE_SDK_TRANSPORT_COAPS
+config PULSE_TRANSPORT_COAPS
 	bool "CoAPS (CoAP over DTLS PSK)"
 	select MBEDTLS
 	select NET_SOCKETS_ENABLE_DTLS
@@ -31,9 +31,23 @@ config PULSE_SDK_TRANSPORT_COAPS
 
 endchoice
 
-config PULSE_SDK_METRICS_USER_DEFINES
+config PULSE_LIBMCU
+	bool "Enable additional libmcu modules"
+	depends on PULSE
+	help
+	  Build and expose additional libmcu modules (retry, ratelim, etc.)
+	  beyond the metrics modules that Pulse requires internally.
+
+config PULSE_CBOR
+	bool "Enable cbor API access"
+	depends on PULSE
+	help
+	  Expose the cbor library headers so the application can use
+	  cbor encoding/decoding directly.
+
+config PULSE_METRICS_USER_DEFINES
 	string "User metrics definition file path"
-	depends on PULSE_SDK
+	depends on PULSE
 	default "include/metrics.def"
 	help
 	  Path to the user-supplied metrics definition file.

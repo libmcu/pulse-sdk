@@ -38,7 +38,7 @@ jobs:
           cmake -B build \
             -DBUILD_TESTING=ON \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DPULSE_SDK_TRANSPORT=https
+            -DPULSE_TRANSPORT=https
 
       - name: Build
         run: cmake --build build --parallel $(nproc)
@@ -86,7 +86,7 @@ jobs:
           cmake -B examples/linux/build \
             -S examples/linux \
             -DCMAKE_BUILD_TYPE=Release \
-            -DPULSE_SDK_TRANSPORT=${{ matrix.transport }}
+            -DPULSE_TRANSPORT=${{ matrix.transport }}
 
       - name: Build
         run: cmake --build examples/linux/build --parallel $(nproc)
@@ -117,7 +117,7 @@ jobs:
           cmake -B examples/generic-cmake/build \
             -S examples/generic-cmake \
             -DCMAKE_BUILD_TYPE=Release \
-            -DPULSE_SDK_TRANSPORT=https
+            -DPULSE_TRANSPORT=https
 
       - name: Build
         run: cmake --build examples/generic-cmake/build --parallel $(nproc)
@@ -159,19 +159,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: components/pulse-sdk
+          path: components/pulse
           submodules: recursive
 
       - name: Copy example to project root
-        run: cp -r components/pulse-sdk/examples/esp-idf/* .
+        run: cp -r components/pulse/examples/esp-idf/* .
 
       - name: Configure transport (https)
         if: matrix.transport == 'https'
-        run: echo "CONFIG_PULSE_SDK_TRANSPORT_HTTPS=y" >> sdkconfig.defaults
+        run: echo "CONFIG_PULSE_TRANSPORT_HTTPS=y" >> sdkconfig.defaults
 
       - name: Configure transport (coaps)
         if: matrix.transport == 'coaps'
-        run: echo "CONFIG_PULSE_SDK_TRANSPORT_COAPS=y" >> sdkconfig.defaults
+        run: echo "CONFIG_PULSE_TRANSPORT_COAPS=y" >> sdkconfig.defaults
 
       - name: Build with ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
@@ -190,23 +190,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: zephyr-workspace/modules/lib/pulse-sdk
+          path: zephyr-workspace/modules/lib/pulse
 
       - name: Prepare
         run: |
           git config --system --add safe.directory '*'
           echo "ZEPHYR_TOOLCHAIN_VARIANT=zephyr" >> $GITHUB_ENV
+          echo "PULSE_SHA=$(git -C zephyr-workspace/modules/lib/pulse rev-parse HEAD)" >> $GITHUB_ENV
 
       - name: Prepare example app workspace
         run: |
           mkdir -p zephyr-workspace/app
-          cp -r zephyr-workspace/modules/lib/pulse-sdk/examples/zephyr/app/. zephyr-workspace/app/
+          cp -r zephyr-workspace/modules/lib/pulse/examples/zephyr/app/. zephyr-workspace/app/
 
       - name: Initialize west workspace
         working-directory: zephyr-workspace
         run: |
           west init -l app --mf west.yml
           west update
+          git -C modules/lib/pulse checkout ${PULSE_SHA}
           west zephyr-export
           echo "ZSDK_VERSION=$(cat zephyr/SDK_VERSION)" >> $GITHUB_ENV
           echo "ZEPHYR_BASE=${PWD}/zephyr" >> $GITHUB_ENV

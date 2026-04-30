@@ -14,6 +14,9 @@
 #include "cbor/base.h"
 #include "cbor/encoder.h"
 
+#include "libmcu/metrics.h"
+#include "libmcu/metrics_overrides.h"
+
 enum pulse_envelope_key {
 	PULSE_ENVELOPE_KEY_SCHEMA = 0,
 	PULSE_ENVELOPE_KEY_DEVICE = 1,
@@ -56,6 +59,33 @@ static size_t get_cbor_encoded_uint_size(uint64_t value)
 
 	return 9u;
 }
+
+static size_t get_cbor_encoded_int_size(int64_t value)
+{
+	if (value >= 0) {
+		return get_cbor_encoded_uint_size((uint64_t)value);
+	}
+
+	return get_cbor_encoded_uint_size((uint64_t)(-1 - value));
+}
+
+static size_t get_cbor_encoded_metric_value_size(int32_t value)
+{
+	return get_cbor_encoded_int_size((int64_t)value);
+}
+
+#if defined(METRICS_SCHEMA_IBS)
+static size_t cbor_encoded_schema_value_size(const struct metric_schema *schema,
+		int32_t value)
+{
+	return get_cbor_encoded_uint_size(5u)
+		+ get_cbor_encoded_uint_size((uint64_t)schema->type)
+		+ get_cbor_encoded_uint_size((uint64_t)schema->unit)
+		+ get_cbor_encoded_int_size((int64_t)schema->range_min)
+		+ get_cbor_encoded_int_size((int64_t)schema->range_max)
+		+ get_cbor_encoded_metric_value_size(value);
+}
+#endif
 
 static size_t get_cbor_encoded_text_size(const char *text)
 {
@@ -200,3 +230,108 @@ pulse_status_t pulse_codec_wrap_metrics_payload(uint8_t *buf, size_t bufsize,
 
 	return PULSE_STATUS_OK;
 }
+
+size_t metrics_encode_header(void *buf, size_t bufsize,
+		uint32_t nr_total, uint32_t nr_updated, void *ctx)
+{
+	(void)nr_total;
+
+	if (nr_updated == 0u) {
+		return 0u;
+	}
+
+	if (buf == NULL) {
+		return get_cbor_encoded_uint_size((uint64_t)nr_updated);
+	}
+
+	if (ctx == NULL) {
+		return 0u;
+	}
+
+	cbor_writer_t *writer = (cbor_writer_t *)ctx;
+	cbor_writer_init(writer, buf, bufsize);
+	if (cbor_encode_map(writer, nr_updated) != CBOR_SUCCESS) {
+		return 0u;
+	}
+
+	return cbor_writer_len(writer);
+}
+
+#if defined(METRICS_SCHEMA_IBS)
+size_t metrics_encode_each(void *buf, size_t bufsize,
+		metric_key_t key, int32_t value,
+		const struct metric_schema *schema, void *ctx)
+{
+	(void)buf;
+	(void)bufsize;
+
+	if (buf == NULL) {
+		return get_cbor_encoded_uint_size((uint64_t)key)
+			+ cbor_encoded_schema_value_size(schema, value);
+	}
+
+	if (ctx == NULL) {
+		return 0u;
+	}
+
+	cbor_writer_t *writer = (cbor_writer_t *)ctx;
+	const size_t len = cbor_writer_len(writer);
+
+	cbor_encode_unsigned_integer(writer, (uint64_t)key);
+
+	/* value → [class, unit, range_min, range_max, value] */
+	cbor_encode_array(writer, 5);
+
+	cbor_encode_unsigned_integer(writer, (uint64_t)schema->type);
+	cbor_encode_unsigned_integer(writer, (uint64_t)schema->unit);
+
+	if (schema->range_min >= 0) {
+		cbor_encode_unsigned_integer(writer, (uint64_t)schema->range_min);
+	} else {
+		cbor_encode_negative_integer(writer, schema->range_min);
+	}
+
+	if (schema->range_max >= 0) {
+		cbor_encode_unsigned_integer(writer, (uint64_t)schema->range_max);
+	} else {
+		cbor_encode_negative_integer(writer, schema->range_max);
+	}
+
+	if (value >= 0) {
+		cbor_encode_unsigned_integer(writer, (uint64_t)value);
+	} else {
+		cbor_encode_negative_integer(writer, value);
+	}
+
+	return cbor_writer_len(writer) - len;
+}
+#else
+size_t metrics_encode_each(void *buf, size_t bufsize,
+		metric_key_t key, int32_t value, void *ctx)
+{
+	(void)buf;
+	(void)bufsize;
+
+	if (buf == NULL) {
+		return get_cbor_encoded_uint_size((uint64_t)key)
+			+ get_cbor_encoded_metric_value_size(value);
+	}
+
+	if (ctx == NULL) {
+		return 0u;
+	}
+
+	cbor_writer_t *writer = (cbor_writer_t *)ctx;
+	const size_t len = cbor_writer_len(writer);
+
+	cbor_encode_unsigned_integer(writer, (uint64_t)key);
+
+	if (value >= 0) {
+		cbor_encode_unsigned_integer(writer, (uint64_t)value);
+	} else {
+		cbor_encode_negative_integer(writer, value);
+	}
+
+	return cbor_writer_len(writer) - len;
+}
+#endif

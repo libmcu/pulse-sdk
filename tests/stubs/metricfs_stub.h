@@ -1,5 +1,5 @@
-#ifndef PULSE_SDK_TEST_METRICFS_STUB_H
-#define PULSE_SDK_TEST_METRICFS_STUB_H
+#ifndef PULSE_TEST_METRICFS_STUB_H
+#define PULSE_TEST_METRICFS_STUB_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -18,4 +18,4 @@ size_t metricfs_stub_size(void);
 }
 #endif
 
-#endif /* PULSE_SDK_TEST_METRICFS_STUB_H */
+#endif /* PULSE_TEST_METRICFS_STUB_H */

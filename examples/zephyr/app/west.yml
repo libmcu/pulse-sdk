@@ -1,15 +1,15 @@
 manifest:
   projects:
     # Full example workspace manifest.
-    # The README only shows the pulse-sdk stanza users add to an existing
+    # The README only shows the pulse stanza users add to an existing
     # manifest, but this example must also fetch Zephyr itself.
     - name: zephyr
       url: https://github.com/zephyrproject-rtos/zephyr.git
       revision: v4.4.0
       import: true
-    - name: pulse-sdk
+    - name: pulse
       url: https://github.com/libmcu/pulse-sdk.git
-      path: modules/lib/pulse-sdk
+      path: modules/lib/pulse
       revision: main
 
   self:

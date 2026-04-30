@@ -5,7 +5,8 @@ extern "C" {
 #include <stdint.h>
 #include <string.h>
 
-#include <libmcu/metrics.h>
+#include "libmcu/metrics.h"
+#include "cbor/cbor.h"
 
 #include "../../src/pulse_codec.h"
 }
@@ -166,10 +167,11 @@ TEST_GROUP(PulseCodec)
 TEST(PulseCodec, ShouldEncodeMetricsAsCanonicalCborMap)
 {
 	uint8_t buf[8];
+	cbor_writer_t writer;
 
 	metrics_set(PulseMetric, METRICS_VALUE(100));
 
-	const size_t len = metrics_collect(buf, sizeof(buf));
+	const size_t len = metrics_collect(buf, sizeof(buf), &writer);
 	CHECK_TRUE(len > 0u);
 	BYTES_EQUAL(0xA1, buf[0]);
 	assert_metric_payload_equals(buf, len, 100);
@@ -178,10 +180,11 @@ TEST(PulseCodec, ShouldEncodeMetricsAsCanonicalCborMap)
 TEST(PulseCodec, ShouldEncodeNegativeMetricValueAsCanonicalCborMap)
 {
 	uint8_t buf[8];
+	cbor_writer_t writer;
 
 	metrics_set(PulseMetric, METRICS_VALUE(-7));
 
-	const size_t len = metrics_collect(buf, sizeof(buf));
+	const size_t len = metrics_collect(buf, sizeof(buf), &writer);
 	CHECK_TRUE(len > 0u);
 	BYTES_EQUAL(0xA1, buf[0]);
 	assert_metric_payload_equals(buf, len, -7);
