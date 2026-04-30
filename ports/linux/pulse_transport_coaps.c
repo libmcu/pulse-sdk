@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "pulse/pulse.h"
+#include "pulse/pulse_internal.h"
+
 #include <netdb.h>
 
 #include <coap3/coap.h>
@@ -18,13 +21,13 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "pulse/pulse.h"
-#include "pulse/pulse_internal.h"
+#include "libmcu/base64.h"
 
 #define PULSE_COAPS_TIMEOUT_MS		15000u
 #define PULSE_COAPS_BUFFER_SIZE		4096u
 #define PULSE_PSK_IDENTITY_LEN		32u
 #define PULSE_PSK_IDENTITY_BUFSIZE	(PULSE_PSK_IDENTITY_LEN + 1u)
+#define PULSE_PSK_KEY_LEN		32u
 
 typedef struct {
 	uint8_t data[PULSE_COAPS_BUFFER_SIZE];
@@ -96,6 +99,21 @@ static int compute_psk_identity(char *identity, size_t identity_size,
 		identity[(i * 2u) + 1u] = hex[digest[i] & 0x0f];
 	}
 	identity[PULSE_PSK_IDENTITY_LEN] = '\0';
+
+	return 0;
+}
+
+static int decode_psk_key(uint8_t *psk_key, size_t psk_key_size,
+		const char *token)
+{
+	if (psk_key == NULL || token == NULL || psk_key_size < PULSE_PSK_KEY_LEN) {
+		return -EINVAL;
+	}
+
+	if (lm_base64url_decode(psk_key, psk_key_size, token, strlen(token))
+			!= PULSE_PSK_KEY_LEN) {
+		return -EINVAL;
+	}
 
 	return 0;
 }
@@ -278,11 +296,12 @@ static int map_coap_nack_reason(coap_nack_reason_t reason)
 	case COAP_NACK_TOO_MANY_RETRIES:
 		return -ETIMEDOUT;
 	case COAP_NACK_NOT_DELIVERABLE:
+		return -EIO;
 	case COAP_NACK_TLS_FAILED:
 	case COAP_NACK_TLS_LAYER_FAILED:
+		return -EPROTO;
 	case COAP_NACK_WS_LAYER_FAILED:
 	case COAP_NACK_WS_FAILED:
-		return -ECANCELED;
 	case COAP_NACK_RST:
 	case COAP_NACK_ICMP_ISSUE:
 	case COAP_NACK_BAD_RESPONSE:
@@ -419,6 +438,7 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 	coap_pdu_code_t response_code = 0;
 	coap_dtls_cpsk_t psk;
 	char psk_identity[PULSE_PSK_IDENTITY_BUFSIZE];
+	uint8_t psk_key[PULSE_PSK_KEY_LEN];
 	int ret;
 	int send_result;
 
@@ -448,6 +468,12 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 		return ret;
 	}
 
+	ret = decode_psk_key(psk_key, sizeof(psk_key), conf->token);
+	if (ret < 0) {
+		transport_debug("failed to decode DTLS PSK key from token");
+		return ret;
+	}
+
 	coap_startup();
 	coap_ctx = coap_new_context(NULL);
 	if (coap_ctx == NULL) {
@@ -468,8 +494,8 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 	psk.client_sni = PULSE_INGEST_HOST;
 	psk.psk_info.identity.s = (const uint8_t *)psk_identity;
 	psk.psk_info.identity.length = strlen(psk_identity);
-	psk.psk_info.key.s = (const uint8_t *)conf->token;
-	psk.psk_info.key.length = strlen(conf->token);
+	psk.psk_info.key.s = psk_key;
+	psk.psk_info.key.length = sizeof(psk_key);
 
 	transport_debugf("sending CoAP DTLS report bytes=%ld timeout_ms=%u",
 			(long)datasize, (unsigned int)get_transmit_timeout_ms(conf));
