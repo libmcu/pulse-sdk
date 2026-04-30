@@ -32,6 +32,10 @@ typedef size_t (*curl_write_callback)(char *ptr, size_t size, size_t nmemb,
 #define CURLE_OK			0
 #define CURLE_OUT_OF_MEMORY		27
 #define CURLE_OPERATION_TIMEDOUT	28
+#define CURLE_COULDNT_RESOLVE_HOST	6
+#define CURLE_COULDNT_CONNECT	7
+#define CURLE_WRITE_ERROR		23
+#define CURLE_RECV_ERROR		56
 
 #define CURL_GLOBAL_DEFAULT		0UL
 

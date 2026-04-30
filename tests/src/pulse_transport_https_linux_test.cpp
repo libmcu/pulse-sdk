@@ -128,6 +128,65 @@ TEST(PulseTransportHttpsLinux, ShouldConfigureCurlRequestFromReportContext)
 	CHECK_EQUAL(1, curl_mock_global_cleanup_call_count());
 }
 
+TEST(PulseTransportHttpsLinux, ShouldReturnOverflowWhenAuthorizationHeaderExceedsLimit)
+{
+	static const uint8_t payload[] = { 0x01 };
+	static const char token[] =
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+	g_report_ctx.conf.token = token;
+
+	CHECK_EQUAL(-EOVERFLOW,
+			pulse_transport_transmit(payload, sizeof(payload), &g_report_ctx));
+	CHECK_EQUAL(1, curl_mock_cleanup_call_count());
+	CHECK_EQUAL(1, curl_mock_global_init_call_count());
+	CHECK_EQUAL(1, curl_mock_global_cleanup_call_count());
+}
+
+TEST(PulseTransportHttpsLinux, ShouldReturnNoHostWhenCurlPerformCannotResolveHost)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	curl_mock_set_perform_result(CURLE_COULDNT_RESOLVE_HOST);
+
+	CHECK_EQUAL(-EHOSTUNREACH,
+			pulse_transport_transmit(payload, sizeof(payload), &g_report_ctx));
+	CHECK_EQUAL(1, curl_mock_cleanup_call_count());
+	CHECK_EQUAL(1, curl_mock_global_init_call_count());
+	CHECK_EQUAL(1, curl_mock_global_cleanup_call_count());
+}
+
+TEST(PulseTransportHttpsLinux, ShouldReturnConnrefusedWhenCurlPerformCannotConnect)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	curl_mock_set_perform_result(CURLE_COULDNT_CONNECT);
+
+	CHECK_EQUAL(-ECONNREFUSED,
+			pulse_transport_transmit(payload, sizeof(payload), &g_report_ctx));
+	CHECK_EQUAL(1, curl_mock_cleanup_call_count());
+	CHECK_EQUAL(1, curl_mock_global_init_call_count());
+	CHECK_EQUAL(1, curl_mock_global_cleanup_call_count());
+}
+
+TEST(PulseTransportHttpsLinux, ShouldReturnNoMemoryWhenCurlPerformIsOutOfMemory)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	curl_mock_set_perform_result(CURLE_OUT_OF_MEMORY);
+
+	CHECK_EQUAL(-ENOMEM,
+			pulse_transport_transmit(payload, sizeof(payload), &g_report_ctx));
+	CHECK_EQUAL(1, curl_mock_cleanup_call_count());
+	CHECK_EQUAL(1, curl_mock_global_init_call_count());
+	CHECK_EQUAL(1, curl_mock_global_cleanup_call_count());
+}
+
 TEST(PulseTransportHttpsLinux, ShouldReturnTimeoutWhenCurlPerformTimesOut)
 {
 	static const uint8_t payload[] = { 0x01 };
@@ -136,6 +195,37 @@ TEST(PulseTransportHttpsLinux, ShouldReturnTimeoutWhenCurlPerformTimesOut)
 	CHECK_EQUAL(-ETIMEDOUT,
 			pulse_transport_transmit(payload, sizeof(payload), &g_report_ctx));
 	CHECK_EQUAL(1, curl_mock_cleanup_call_count());
+	CHECK_EQUAL(1, curl_mock_global_cleanup_call_count());
+}
+
+TEST(PulseTransportHttpsLinux, ShouldBalanceCurlGlobalLifecycleAcrossConsecutiveCalls)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	CHECK_EQUAL(0,
+			pulse_transport_transmit(payload, sizeof(payload), &g_report_ctx));
+	CHECK_EQUAL(0,
+			pulse_transport_transmit(payload, sizeof(payload), &g_report_ctx));
+
+	CHECK_EQUAL(2, curl_mock_global_init_call_count());
+	CHECK_EQUAL(2, curl_mock_cleanup_call_count());
+	CHECK_EQUAL(2, curl_mock_global_cleanup_call_count());
+}
+
+TEST(PulseTransportHttpsLinux, ShouldRecoverFromGlobalInitFailureWithoutRefcountLeak)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	curl_mock_set_global_init_result(CURLE_COULDNT_CONNECT);
+	CHECK_EQUAL(-ECONNREFUSED,
+			pulse_transport_transmit(payload, sizeof(payload), &g_report_ctx));
+	CHECK_EQUAL(1, curl_mock_global_init_call_count());
+	CHECK_EQUAL(0, curl_mock_global_cleanup_call_count());
+
+	curl_mock_set_global_init_result(CURLE_OK);
+	CHECK_EQUAL(0,
+			pulse_transport_transmit(payload, sizeof(payload), &g_report_ctx));
+	CHECK_EQUAL(2, curl_mock_global_init_call_count());
 	CHECK_EQUAL(1, curl_mock_global_cleanup_call_count());
 }
 
