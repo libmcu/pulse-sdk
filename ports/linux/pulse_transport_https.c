@@ -4,18 +4,20 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "pulse/pulse.h"
+#include "pulse/pulse_internal.h"
+
 #include <curl/curl.h>
 
 #include <errno.h>
+#include <pthread.h>
+#include <stdlib.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
-#include "pulse/pulse.h"
-#include "pulse/pulse_internal.h"
 
 #define PULSE_HTTPS_TIMEOUT_MS		60000L
 #define PULSE_HTTPS_BUFFER_SIZE		4096U
@@ -31,6 +33,9 @@ typedef struct {
 	char auth_header[PULSE_HTTPS_AUTH_HEADER_SIZE];
 	struct curl_slist *list;
 } request_headers_t;
+
+static pthread_mutex_t curl_global_lock = PTHREAD_MUTEX_INITIALIZER;
+static unsigned int curl_global_refcount;
 
 static void transport_debug(const char *message)
 {
@@ -59,6 +64,7 @@ static long get_transmit_timeout_ms(const struct pulse *conf)
 
 static int map_curl_error(CURLcode code)
 {
+	/* Map libcurl failure classes to errno-style return codes for callers/tests. */
 	switch (code) {
 	case CURLE_OK:
 		return 0;
@@ -66,9 +72,49 @@ static int map_curl_error(CURLcode code)
 		return -ETIMEDOUT;
 	case CURLE_OUT_OF_MEMORY:
 		return -ENOMEM;
+	case CURLE_COULDNT_RESOLVE_HOST:
+		return -EHOSTUNREACH;
+	case CURLE_COULDNT_CONNECT:
+		return -ECONNREFUSED;
+	case CURLE_WRITE_ERROR:
+	case CURLE_RECV_ERROR:
+		return -EIO;
 	default:
 		return -EIO;
 	}
+}
+
+static int acquire_curl_global(void)
+{
+	int ret = 0;
+
+	pthread_mutex_lock(&curl_global_lock);
+	if (curl_global_refcount == 0u) {
+		CURLcode err = curl_global_init(CURL_GLOBAL_DEFAULT);
+
+		if (err != CURLE_OK) {
+			ret = map_curl_error(err);
+		} else {
+			curl_global_refcount = 1u;
+		}
+	} else {
+		curl_global_refcount++;
+	}
+	pthread_mutex_unlock(&curl_global_lock);
+
+	return ret;
+}
+
+static void release_curl_global(void)
+{
+	pthread_mutex_lock(&curl_global_lock);
+	if (curl_global_refcount > 0u) {
+		curl_global_refcount--;
+		if (curl_global_refcount == 0u) {
+			curl_global_cleanup();
+		}
+	}
+	pthread_mutex_unlock(&curl_global_lock);
 }
 
 static size_t on_http_response(char *ptr, size_t size, size_t nmemb,
@@ -229,10 +275,11 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 		const struct pulse_report_ctx *ctx)
 {
 	const struct pulse *conf = ctx != NULL ? &ctx->conf : NULL;
-	request_headers_t headers;
-	response_buffer_t response;
-	CURL *handle;
+	request_headers_t headers = { 0 };
+	response_buffer_t response = { 0 };
+	CURL *handle = NULL;
 	int ret;
+	bool curl_global_started = false;
 
 	if (data == NULL || datasize == 0u) {
 		transport_debug("invalid transmit arguments");
@@ -249,48 +296,62 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 		return -ENOTSUP;
 	}
 
+	ret = acquire_curl_global();
+	if (ret < 0) {
+		transport_debug("curl_global_init failed");
+		return ret;
+	}
+	curl_global_started = true;
+
 	handle = curl_easy_init();
 	if (handle == NULL) {
 		transport_debug("curl_easy_init failed");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto out;
 	}
 
-	memset(&response, 0, sizeof(response));
-	transport_debugf("sending report bytes=%ld timeout_ms=%ld",
-			(long)datasize, get_transmit_timeout_ms(conf));
+	transport_debugf("sending report bytes=%zu timeout_ms=%ld",
+			datasize, get_transmit_timeout_ms(conf));
 	ret = build_headers(&headers, conf);
 	if (ret < 0) {
 		transport_debug("failed to build request headers");
-		release_headers(&headers);
-		curl_easy_cleanup(handle);
-		return ret;
+		goto out;
 	}
 
 	ret = configure_request(handle, &headers, &response, data, datasize, conf);
 	if (ret < 0) {
 		transport_debug("failed to configure curl request");
+		goto out;
 	}
-	if (ret == 0) {
-		ret = map_curl_error(curl_easy_perform(handle));
-		if (ret < 0) {
-			transport_debugf("curl perform failed err=%ld", (long)ret);
-		}
-	}
-	if (ret == 0) {
-		ret = check_response_status(handle);
-	}
-	if (ret == 0 && response.truncated) {
-		transport_debug("response body exceeded local buffer");
-		ret = -EMSGSIZE;
-	}
-	if (ret == 0) {
-		transport_debugf("report delivered response_bytes=%ld",
-				(long)response.len);
-		deliver_response(&response, ctx);
+	ret = map_curl_error(curl_easy_perform(handle));
+	if (ret < 0) {
+		transport_debugf("curl perform failed err=%d", ret);
+		goto out;
 	}
 
+	ret = check_response_status(handle);
+	if (ret < 0) {
+		goto out;
+	}
+
+	if (response.truncated) {
+		transport_debug("response body exceeded local buffer");
+		ret = -EMSGSIZE;
+		goto out;
+	}
+
+	transport_debugf("report delivered response_bytes=%zu", response.len);
+	deliver_response(&response, ctx);
+	ret = 0;
+
+out:
 	release_headers(&headers);
-	curl_easy_cleanup(handle);
+	if (handle != NULL) {
+		curl_easy_cleanup(handle);
+	}
+	if (curl_global_started) {
+		release_curl_global();
+	}
 
 	return ret;
 }

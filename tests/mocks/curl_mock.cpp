@@ -20,6 +20,7 @@ static CURL g_default_handle;
 
 static struct {
 	CURL *init_handle;
+	CURLcode global_init_result;
 	CURL *last_handle;
 	CURLcode perform_result;
 	CURLcode getinfo_result;
@@ -36,6 +37,8 @@ static struct {
 	void *write_data;
 	struct curl_slist *headers_snapshot;
 	int cleanup_call_count;
+	int global_init_call_count;
+	int global_cleanup_call_count;
 } g_state;
 
 static char *duplicate_string(const char *data);
@@ -106,6 +109,7 @@ extern "C" void curl_mock_reset(void)
 
 	memset(&g_state, 0, sizeof(g_state));
 	g_state.init_handle = &g_default_handle;
+	g_state.global_init_result = CURLE_OK;
 	g_state.perform_result = CURLE_OK;
 	g_state.getinfo_result = CURLE_OK;
 	g_state.response_code = 200;
@@ -124,6 +128,11 @@ extern "C" void curl_mock_set_perform_result(CURLcode result)
 extern "C" void curl_mock_set_getinfo_result(CURLcode result)
 {
 	g_state.getinfo_result = result;
+}
+
+extern "C" void curl_mock_set_global_init_result(CURLcode result)
+{
+	g_state.global_init_result = result;
 }
 
 extern "C" void curl_mock_set_response_code(long code)
@@ -191,6 +200,44 @@ extern "C" struct curl_slist *curl_mock_last_headers(void)
 extern "C" int curl_mock_cleanup_call_count(void)
 {
 	return g_state.cleanup_call_count;
+}
+
+extern "C" int curl_mock_global_init_call_count(void)
+{
+	return g_state.global_init_call_count;
+}
+
+extern "C" int curl_mock_global_cleanup_call_count(void)
+{
+	return g_state.global_cleanup_call_count;
+}
+
+extern "C" CURLcode curl_global_init(long flags)
+{
+	(void)flags;
+	g_state.global_init_call_count++;
+	return g_state.global_init_result;
+}
+
+extern "C" CURLcode curl_global_sslset(long id, const char *name,
+		const void *avail)
+{
+	(void)id;
+	(void)name;
+	(void)avail;
+	return CURLE_OK;
+}
+
+extern "C" CURLcode curl_global_trace(const char *config)
+{
+	(void)config;
+	return CURLE_OK;
+}
+
+extern "C" CURLcode curl_global_cleanup(void)
+{
+	g_state.global_cleanup_call_count++;
+	return CURLE_OK;
 }
 
 extern "C" CURL *curl_easy_init(void)

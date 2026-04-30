@@ -8,6 +8,7 @@ endif
 
 SRC_FILES = \
 	../ports/linux/pulse_transport_coaps.c \
+	$(LIBMCU_ROOT)/modules/common/src/base64.c \
 
 TEST_SRC_FILES = \
 	src/pulse_transport_coaps_linux_test.cpp \
