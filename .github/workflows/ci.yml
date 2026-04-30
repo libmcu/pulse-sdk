@@ -184,6 +184,13 @@ jobs:
     name: Build / Zephyr
     runs-on: ubuntu-latest
     container: ghcr.io/zephyrproject-rtos/ci:v0.28.7
+    strategy:
+      matrix:
+        include:
+          - transport: https
+            transport_conf: prj_https.conf
+          - transport: coaps
+            transport_conf: prj_coaps.conf
     defaults:
       run:
         shell: bash
@@ -239,9 +246,14 @@ jobs:
           echo "ZEPHYR_SDK_INSTALL_DIR=${SDK_ROOT}" >> $GITHUB_ENV
           echo "CMAKE_PREFIX_PATH=${SDK_PATH}" >> $GITHUB_ENV
 
-      - name: Build for native_sim
+      - name: Build for native_sim (${{ matrix.transport }})
         working-directory: zephyr-workspace/app
-        run: west build -b native_sim .
+        run: |
+          west build -b native_sim \
+            --build-dir build-${{ matrix.transport }} \
+            -- \
+            -DCONF_FILE="prj.conf;${{ matrix.transport_conf }}" \
+            .
 
   release:
     name: Release

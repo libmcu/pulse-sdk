@@ -107,6 +107,15 @@ TEST(PulseTransportHttpsZephyr, ShouldReturnOverflowWhenDataSizeExceedsInt32Max)
 	CHECK_TRANSMIT_EQ(-EOVERFLOW, payload, (size_t)INT32_MAX + 1u, &g_ctx);
 }
 
+TEST(PulseTransportHttpsZephyr, ShouldReturnOverflowWhenConfiguredTimeoutIsTooLarge)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	g_ctx.conf.transmit_timeout_ms = (uint32_t)INT32_MAX + 1u;
+
+	CHECK_TRANSMIT_EQ(-EOVERFLOW, payload, sizeof(payload), &g_ctx);
+}
+
 TEST(PulseTransportHttpsZephyr, ShouldReturnNotSupportedWhenAsyncTransportRequested)
 {
 	static const uint8_t payload[] = { 0x01 };
