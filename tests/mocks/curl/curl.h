@@ -33,6 +33,8 @@ typedef size_t (*curl_write_callback)(char *ptr, size_t size, size_t nmemb,
 #define CURLE_OUT_OF_MEMORY		27
 #define CURLE_OPERATION_TIMEDOUT	28
 
+#define CURL_GLOBAL_DEFAULT		0UL
+
 #define CURLOPT_WRITEDATA		10001
 #define CURLOPT_URL			10002
 #define CURLOPT_POSTFIELDS		10015
@@ -46,6 +48,10 @@ typedef size_t (*curl_write_callback)(char *ptr, size_t size, size_t nmemb,
 #define CURLINFO_RESPONSE_CODE		0x200002
 
 CURL *curl_easy_init(void);
+CURLcode curl_global_init(long flags);
+CURLcode curl_global_sslset(long id, const char *name, const void *avail);
+CURLcode curl_global_trace(const char *config);
+CURLcode curl_global_cleanup(void);
 CURLcode curl_easy_setopt(CURL *curl, CURLoption option, ...);
 CURLcode curl_easy_perform(CURL *curl);
 CURLcode curl_easy_getinfo(CURL *curl, CURLINFO info, ...);
@@ -58,6 +64,7 @@ void curl_mock_reset(void);
 void curl_mock_set_init_handle(CURL *handle);
 void curl_mock_set_perform_result(CURLcode result);
 void curl_mock_set_getinfo_result(CURLcode result);
+void curl_mock_set_global_init_result(CURLcode result);
 void curl_mock_set_response_code(long code);
 void curl_mock_inject_response(const void *data, size_t len);
 const char *curl_mock_last_url(void);
@@ -70,6 +77,8 @@ curl_write_callback curl_mock_last_write_callback(void);
 void *curl_mock_last_write_data(void);
 struct curl_slist *curl_mock_last_headers(void);
 int curl_mock_cleanup_call_count(void);
+int curl_mock_global_init_call_count(void);
+int curl_mock_global_cleanup_call_count(void);
 
 #ifdef __cplusplus
 }

@@ -81,6 +81,20 @@ TEST(PulseTransportHttpsLinux, ShouldReturnNoMemoryWhenCurlInitFails)
 
 	CHECK_EQUAL(-ENOMEM,
 			pulse_transport_transmit(payload, sizeof(payload), &g_report_ctx));
+	CHECK_EQUAL(1, curl_mock_global_init_call_count());
+	CHECK_EQUAL(1, curl_mock_global_cleanup_call_count());
+}
+
+TEST(PulseTransportHttpsLinux, ShouldReturnIoWhenCurlGlobalInitFails)
+{
+	static const uint8_t payload[] = { 0x01 };
+	curl_mock_set_global_init_result(CURLE_OUT_OF_MEMORY);
+
+	CHECK_EQUAL(-ENOMEM,
+			pulse_transport_transmit(payload, sizeof(payload), &g_report_ctx));
+	CHECK_EQUAL(1, curl_mock_global_init_call_count());
+	CHECK_EQUAL(0, curl_mock_cleanup_call_count());
+	CHECK_EQUAL(0, curl_mock_global_cleanup_call_count());
 }
 
 TEST(PulseTransportHttpsLinux, ShouldConfigureCurlRequestFromReportContext)
@@ -110,6 +124,8 @@ TEST(PulseTransportHttpsLinux, ShouldConfigureCurlRequestFromReportContext)
 	STRCMP_EQUAL("Authorization: Bearer test-token", headers->next->data);
 	CHECK(headers->next->next == NULL);
 	CHECK_EQUAL(1, curl_mock_cleanup_call_count());
+	CHECK_EQUAL(1, curl_mock_global_init_call_count());
+	CHECK_EQUAL(1, curl_mock_global_cleanup_call_count());
 }
 
 TEST(PulseTransportHttpsLinux, ShouldReturnTimeoutWhenCurlPerformTimesOut)
@@ -120,6 +136,7 @@ TEST(PulseTransportHttpsLinux, ShouldReturnTimeoutWhenCurlPerformTimesOut)
 	CHECK_EQUAL(-ETIMEDOUT,
 			pulse_transport_transmit(payload, sizeof(payload), &g_report_ctx));
 	CHECK_EQUAL(1, curl_mock_cleanup_call_count());
+	CHECK_EQUAL(1, curl_mock_global_cleanup_call_count());
 }
 
 TEST(PulseTransportHttpsLinux, ShouldReturnIoWhenResponseStatusIsFailure)
