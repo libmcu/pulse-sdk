@@ -80,7 +80,8 @@ static bool is_required_string_valid(const char *value)
 
 static bool is_token_valid(const char *token)
 {
-	return is_required_string_valid(token) && strlen(token) <= PULSE_TOKEN_LEN;
+	return is_required_string_valid(token)
+		&& strlen(token) <= PULSE_TOKEN_LEN;
 }
 
 static bool is_metadata_valid(const struct pulse *pulse)
@@ -218,8 +219,8 @@ static pulse_status_t derive_payload_bufsize(size_t current_payload_len,
 	ctx.window_end = UINT64_MAX;
 	ctx.snapshot_reason = UINT8_MAX;
 
-	*bufsize = max_metrics_payload_len +
-		pulse_codec_max_envelope_overhead(&ctx, max_metrics_payload_len);
+	*bufsize = max_metrics_payload_len + pulse_codec_max_envelope_overhead(
+			&ctx, max_metrics_payload_len);
 	if (*bufsize < max_metrics_payload_len
 			|| *bufsize > SIZE_MAX - PULSE_PAYLOAD_MARGIN) {
 		return PULSE_STATUS_OVERFLOW;
@@ -281,14 +282,28 @@ static pulse_status_t map_metrics_report_error(int err)
 	}
 }
 
-static pulse_status_t collect_live_payload(uint8_t reason)
+/* NOTE: Any metric changes that occur after metrics_collect() and before
+ * metrics_reset() are silently lost regardless of the transmission outcome.
+ * This is an inherent limitation of the current single-buffer design.
+ * Alternatives: (1) double-buffer at the metrics layer, or (2) drop
+ * snapshot_reason from the envelope and store the original flight buffer
+ * as-is on abort, eliminating the need for re-collection entirely.
+ *
+ * with_user_callback: Pass true on the normal report path to invoke the
+ * user-registered prepare handler before collecting. Pass false when
+ * re-collecting after a failed transmit (e.g. abort_flight) to avoid
+ * invoking the handler a second time. */
+static pulse_status_t collect_live_payload(uint8_t reason,
+		bool with_user_callback)
 {
 	struct pulse_envelope_ctx ctx;
 	size_t metrics_len;
 	cbor_writer_t writer;
 
 	m.flight_reason = reason;
-	invoke_prepare_chain();
+	if (with_user_callback) {
+		invoke_prepare_chain();
+	}
 	set_live_window_bounds();
 
 	metrics_len = metrics_collect(m.flight_buf, m.flight_bufsize, &writer);
@@ -315,8 +330,9 @@ static pulse_status_t abort_flight(int transmit_err)
 
 	if (!m.flight_from_backlog && m.conf.mfs != NULL) {
 		status = collect_live_payload((transmit_err == -ECANCELED)
-				? PULSE_SNAPSHOT_REASON_BACKLOG_CANCEL
-				: PULSE_SNAPSHOT_REASON_BACKLOG_FAILURE);
+					? PULSE_SNAPSHOT_REASON_BACKLOG_CANCEL
+					: PULSE_SNAPSHOT_REASON_BACKLOG_FAILURE,
+				false);
 		if (status == PULSE_STATUS_OK && m.flight_len > 0u &&
 				metricfs_write(m.conf.mfs, m.flight_buf,
 						m.flight_len, NULL) == 0) {
@@ -393,7 +409,8 @@ static pulse_status_t collect_from_backlog(void)
 
 static pulse_status_t collect_from_live_metrics(void)
 {
-	pulse_status_t status = collect_live_payload(PULSE_SNAPSHOT_REASON_LIVE);
+	pulse_status_t status =
+		collect_live_payload(PULSE_SNAPSHOT_REASON_LIVE, true);
 	if (status != PULSE_STATUS_OK) {
 		return status;
 	}

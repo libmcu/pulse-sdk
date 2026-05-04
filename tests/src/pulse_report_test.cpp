@@ -1481,7 +1481,7 @@ TEST(PulseReport, ShouldSaveToBacklogOnCancelWhenMfsAvailableAndNotFromStore)
 			0u, true, 5, true, 2u);
 }
 
-TEST(PulseReport, ShouldCallPrepareHandlerBeforeMetricsReportPrepareWhenCancelSavesBacklog)
+TEST(PulseReport, ShouldNotCallPrepareHandlerAgainWhenCancelSavesBacklog)
 {
 	int prepare_ctx = 2;
 	struct pulse conf = make_pulse_conf();
@@ -1506,9 +1506,7 @@ TEST(PulseReport, ShouldCallPrepareHandlerBeforeMetricsReportPrepareWhenCancelSa
 
 	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_cancel());
 
-	CHECK_EQUAL(1u, prepare_handler_calls);
-	POINTERS_EQUAL(&prepare_ctx, last_prepare_handler_ctx);
-	CHECK_EQUAL(1u, prepare_handler_order);
+	CHECK_EQUAL(0u, prepare_handler_calls);
 }
 
 TEST(PulseReport, ShouldNotSaveToBacklogOnCancelWhenMfsNotAvailable)
