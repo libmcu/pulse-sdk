@@ -223,9 +223,10 @@ static void assert_metric_payload_matches(const uint8_t *payload, size_t payload
 	UNSIGNED_LONGS_EQUAL(payload_len, cursor.pos);
 }
 
-static void assert_envelope_payload(const uint8_t *payload, size_t payload_len,
-		uint64_t expected_timestamp, bool has_metrics, int32_t expected_metric_value,
-		bool has_reason, uint8_t expected_reason)
+static void assert_envelope_payload_with_window(const uint8_t *payload, size_t payload_len,
+		uint64_t expected_timestamp, uint64_t expected_window_start,
+		uint64_t expected_window_end, bool has_metrics,
+		int32_t expected_metric_value, bool has_reason, uint8_t expected_reason)
 {
 	struct cbor_cursor cursor = { payload, payload_len, 0u };
 	const size_t expected_report_entries = (expected_timestamp != 0u ? 3u : 0u)
@@ -249,9 +250,9 @@ static void assert_envelope_payload(const uint8_t *payload, size_t payload_len,
 		UNSIGNED_LONGS_EQUAL(0u, cbor_read_uint(&cursor));
 		UNSIGNED_LONGS_EQUAL(expected_timestamp, cbor_read_uint(&cursor));
 		UNSIGNED_LONGS_EQUAL(1u, cbor_read_uint(&cursor));
-		UNSIGNED_LONGS_EQUAL(expected_timestamp, cbor_read_uint(&cursor));
+		UNSIGNED_LONGS_EQUAL(expected_window_start, cbor_read_uint(&cursor));
 		UNSIGNED_LONGS_EQUAL(2u, cbor_read_uint(&cursor));
-		UNSIGNED_LONGS_EQUAL(expected_timestamp, cbor_read_uint(&cursor));
+		UNSIGNED_LONGS_EQUAL(expected_window_end, cbor_read_uint(&cursor));
 	}
 
 	if (has_reason) {
@@ -266,6 +267,15 @@ static void assert_envelope_payload(const uint8_t *payload, size_t payload_len,
 	}
 
 	UNSIGNED_LONGS_EQUAL(payload_len, cursor.pos);
+}
+
+static void assert_envelope_payload(const uint8_t *payload, size_t payload_len,
+		uint64_t expected_timestamp, bool has_metrics, int32_t expected_metric_value,
+		bool has_reason, uint8_t expected_reason)
+{
+	assert_envelope_payload_with_window(payload, payload_len,
+			expected_timestamp, expected_timestamp, expected_timestamp,
+			has_metrics, expected_metric_value, has_reason, expected_reason);
 }
 
 static struct pulse make_pulse_conf(void)
@@ -1467,6 +1477,43 @@ TEST(PulseReport, ShouldBypassTimingGateWhenBacklogExists)
 		.andReturnValue(0);
 
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+}
+
+TEST(PulseReport, ShouldSaveElapsedLiveMetricsToBacklogBeforeReplayingOldestBacklog)
+{
+	fake_timestamp = 1000u;
+	init_pulse_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EIO);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+
+	uint8_t oldest_payload[1024];
+	size_t oldest_len = metricfs_stub_size();
+	memcpy(oldest_payload, metricfs_stub_data(), oldest_len);
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_report());
+
+	LONGS_EQUAL(oldest_len, transmitted_payload_len);
+	MEMCMP_EQUAL(oldest_payload, transmitted_payload, oldest_len);
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	assert_envelope_payload_with_window((const uint8_t *)metricfs_stub_data(),
+			metricfs_stub_size(), 1000u + 3600u + 3600u, 1000u,
+			1000u + 3600u + 3600u, true, 3, false, 0u);
 }
 
 TEST(PulseReport, ShouldReturnIoWhenBacklogPeekFails)

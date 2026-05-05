@@ -421,6 +421,28 @@ static pulse_status_t collect_from_live_metrics(void)
 	return PULSE_STATUS_OK;
 }
 
+static pulse_status_t save_live_metrics_to_backlog(void)
+{
+	pulse_status_t status =
+		collect_live_payload(PULSE_SNAPSHOT_REASON_LIVE, true);
+	if (status != PULSE_STATUS_OK) {
+		return status;
+	}
+
+	int err = metricfs_write(m.conf.mfs, m.flight_buf, m.flight_len, NULL);
+	if (err != 0) {
+		return map_metrics_report_error(err);
+	}
+
+	metrics_reset();
+	if (m.flight_window_end != 0u) {
+		set_last_report_time(m.flight_window_end);
+		m.periodic_initialized = true;
+	}
+
+	return PULSE_STATUS_OK;
+}
+
 static pulse_status_t do_collect(void)
 {
 	pulse_status_t status;
@@ -441,6 +463,17 @@ static pulse_status_t do_collect(void)
 	}
 
 	if (has_backlog()) {
+		const uint64_t now = metrics_get_unix_timestamp();
+
+		if (now != 0u && m.periodic_initialized
+				&& is_interval_reached(now)) {
+			status = save_live_metrics_to_backlog();
+			if (status != PULSE_STATUS_OK) {
+				free_flight_buf();
+				return status;
+			}
+		}
+
 		return collect_from_backlog();
 	}
 
