@@ -973,14 +973,14 @@ TEST(PulseReport, ShouldReturnTooSoonWhenIntervalNotElapsed)
 	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
 }
 
-TEST(PulseReport, ShouldReturnZeroMsUntilNextReportBeforeFirstReport)
+TEST(PulseReport, ShouldReturnZeroSecUntilNextReportBeforeFirstReport)
 {
 	fake_timestamp = 1000u;
 
-	UNSIGNED_LONGS_EQUAL(0u, pulse_get_ms_until_next_report());
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
 }
 
-TEST(PulseReport, ShouldReturnRemainingMsUntilNextReport)
+TEST(PulseReport, ShouldReturnRemainingSecUntilNextReport)
 {
 	fake_timestamp = 1000u;
 
@@ -993,11 +993,11 @@ TEST(PulseReport, ShouldReturnRemainingMsUntilNextReport)
 
 	fake_timestamp = 1001u;
 
-	UNSIGNED_LONGS_EQUAL((3600u - 1u) * 1000u,
-			pulse_get_ms_until_next_report());
+	UNSIGNED_LONGS_EQUAL(3600u - 1u,
+			pulse_get_sec_until_next_report());
 }
 
-TEST(PulseReport, ShouldReturnZeroMsUntilNextReportWhenIntervalElapsed)
+TEST(PulseReport, ShouldReturnZeroSecUntilNextReportWhenIntervalElapsed)
 {
 	fake_timestamp = 1000u;
 
@@ -1010,10 +1010,10 @@ TEST(PulseReport, ShouldReturnZeroMsUntilNextReportWhenIntervalElapsed)
 
 	fake_timestamp = 1000u + 3600u;
 
-	UNSIGNED_LONGS_EQUAL(0u, pulse_get_ms_until_next_report());
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
 }
 
-TEST(PulseReport, ShouldReturnZeroMsUntilNextReportAfterTimestampRollback)
+TEST(PulseReport, ShouldReturnZeroSecUntilNextReportAfterTimestampRollback)
 {
 	fake_timestamp = 5000u;
 
@@ -1025,11 +1025,11 @@ TEST(PulseReport, ShouldReturnZeroMsUntilNextReportAfterTimestampRollback)
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 
 	fake_timestamp = 100u;
-	UNSIGNED_LONGS_EQUAL(0u, pulse_get_ms_until_next_report());
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
 
 	fake_timestamp = 101u;
 	UNSIGNED_LONGS_EQUAL(0u,
-			pulse_get_ms_until_next_report());
+			pulse_get_sec_until_next_report());
 }
 
 TEST(PulseReport, ShouldNotRestartReportWindowWhenQuerySeesTimestampRollback)
@@ -1044,7 +1044,7 @@ TEST(PulseReport, ShouldNotRestartReportWindowWhenQuerySeesTimestampRollback)
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 
 	fake_timestamp = 100u;
-	UNSIGNED_LONGS_EQUAL(0u, pulse_get_ms_until_next_report());
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
 
 	fake_timestamp = 100u + 3600u;
 	metrics_set(PulseMetric, METRICS_VALUE(2));
@@ -1058,7 +1058,7 @@ TEST(PulseReport, ShouldNotRestartReportWindowWhenQuerySeesTimestampRollback)
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
-TEST(PulseReport, ShouldReturnZeroMsUntilNextReportWhenTimestampIsZero)
+TEST(PulseReport, ShouldReturnZeroSecUntilNextReportWhenTimestampIsZero)
 {
 	fake_timestamp = 1000u;
 
@@ -1071,10 +1071,10 @@ TEST(PulseReport, ShouldReturnZeroMsUntilNextReportWhenTimestampIsZero)
 
 	fake_timestamp = 0u;
 
-	UNSIGNED_LONGS_EQUAL(0u, pulse_get_ms_until_next_report());
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
 }
 
-TEST(PulseReport, ShouldReturnZeroMsUntilNextReportWhenInFlight)
+TEST(PulseReport, ShouldReturnZeroSecUntilNextReportWhenInFlight)
 {
 	fake_timestamp = 1000u;
 	init_pulse_async();
@@ -1086,10 +1086,10 @@ TEST(PulseReport, ShouldReturnZeroMsUntilNextReportWhenInFlight)
 	metrics_set(PulseMetric, METRICS_VALUE(1));
 	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
 
-	UNSIGNED_LONGS_EQUAL(0u, pulse_get_ms_until_next_report());
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
 }
 
-TEST(PulseReport, ShouldReturnZeroMsUntilNextReportWhenBacklogPending)
+TEST(PulseReport, ShouldReturnZeroSecUntilNextReportWhenBacklogPending)
 {
 	fake_timestamp = 1000u;
 	init_pulse_with_mfs();
@@ -1104,7 +1104,7 @@ TEST(PulseReport, ShouldReturnZeroMsUntilNextReportWhenBacklogPending)
 	metricfs_stub_prime(transmitted_payload, transmitted_payload_len, 1u);
 	fake_timestamp = 1001u;
 
-	UNSIGNED_LONGS_EQUAL(0u, pulse_get_ms_until_next_report());
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
 }
 
 TEST(PulseReport, ShouldReportWhenIntervalHasElapsed)

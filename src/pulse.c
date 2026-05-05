@@ -147,13 +147,6 @@ static bool is_interval_reached(const uint64_t now)
 	return (now - get_last_report_time()) >= METRICS_REPORT_INTERVAL_SEC;
 }
 
-static uint32_t sec_to_ms(uint64_t sec)
-{
-	const uint64_t ms = sec * 1000u;
-
-	return ms > UINT32_MAX ? UINT32_MAX : (uint32_t)ms;
-}
-
 static void invoke_prepare_chain(void)
 {
 	if (m.on_prepare != NULL) {
@@ -505,7 +498,7 @@ pulse_status_t pulse_set_prepare_handler(pulse_prepare_handler_t handler,
 	return PULSE_STATUS_OK;
 }
 
-uint32_t pulse_get_ms_until_next_report(void)
+uint32_t pulse_get_sec_until_next_report(void)
 {
 	const uint64_t now = metrics_get_unix_timestamp();
 
@@ -523,7 +516,7 @@ uint32_t pulse_get_ms_until_next_report(void)
 		return 0u;
 	}
 
-	return sec_to_ms(METRICS_REPORT_INTERVAL_SEC - elapsed_sec);
+	return METRICS_REPORT_INTERVAL_SEC - elapsed_sec;
 }
 
 pulse_status_t pulse_report(void)
