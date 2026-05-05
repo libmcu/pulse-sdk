@@ -192,6 +192,23 @@ pulse_status_t pulse_set_prepare_handler(pulse_prepare_handler_t handler,
 pulse_status_t pulse_report(void);
 
 /**
+ * @brief Return milliseconds until the next live report may be sent.
+ *
+ * Not thread-safe. Must not be called concurrently with pulse_report(),
+ * pulse_init(), pulse_update_token(), pulse_update_metricfs(),
+ * pulse_set_response_handler(), pulse_set_prepare_handler(), or
+ * pulse_cancel().
+ *
+ * Returns 0 when the module is not initialized, when a live report may be
+ * attempted immediately, when backlog or in-flight transfer handling can
+ * proceed, or when timestamp-based periodic gating is not active. A return
+ * value of 0 does not imply that pulse_report() will succeed.
+ *
+ * @return Milliseconds until the next live report window.
+ */
+uint32_t pulse_get_ms_until_next_report(void);
+
+/**
  * @brief Cancel an in-progress async transfer.
  *
  * May only be called when pulse_report() previously returned
