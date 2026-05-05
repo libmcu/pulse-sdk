@@ -1512,7 +1512,7 @@ TEST(PulseReport, ShouldSaveElapsedLiveMetricsToBacklogBeforeReplayingOldestBack
 	MEMCMP_EQUAL(oldest_payload, transmitted_payload, oldest_len);
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 	assert_envelope_payload_with_window((const uint8_t *)metricfs_stub_data(),
-			metricfs_stub_size(), 1000u + 3600u + 3600u, 1000u,
+			metricfs_stub_size(), 1000u + 3600u + 3600u, 1000u + 3600u,
 			1000u + 3600u + 3600u, true, 3, false, 0u);
 }
 
@@ -1688,6 +1688,38 @@ TEST(PulseReport, ShouldNotCallPrepareHandlerAgainWhenCancelSavesBacklog)
 	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_cancel());
 
 	CHECK_EQUAL(0u, prepare_handler_calls);
+}
+
+TEST(PulseReport, ShouldAdvanceWindowBoundaryWhenCancelSavesBacklog)
+{
+	fake_timestamp = 1000u;
+	init_pulse_async_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_cancel());
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_report());
+
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	assert_envelope_payload_with_window((const uint8_t *)metricfs_stub_data(),
+			metricfs_stub_size(), 1000u + 3600u + 3600u, 1000u + 3600u,
+			1000u + 3600u + 3600u, true, 3, false, 0u);
 }
 
 TEST(PulseReport, ShouldNotSaveToBacklogOnCancelWhenMfsNotAvailable)

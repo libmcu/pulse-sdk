@@ -337,6 +337,10 @@ static pulse_status_t abort_flight(int transmit_err)
 				metricfs_write(m.conf.mfs, m.flight_buf,
 						m.flight_len, NULL) == 0) {
 			metrics_reset();
+			if (m.flight_window_end != 0u) {
+				set_last_report_time(m.flight_window_end);
+				m.periodic_initialized = true;
+			}
 			saved_to_backlog = true;
 		} else if (status != PULSE_STATUS_OK) {
 			clear_in_flight();
