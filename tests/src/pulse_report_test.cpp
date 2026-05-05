@@ -973,6 +973,140 @@ TEST(PulseReport, ShouldReturnTooSoonWhenIntervalNotElapsed)
 	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
 }
 
+TEST(PulseReport, ShouldReturnZeroSecUntilNextReportBeforeFirstReport)
+{
+	fake_timestamp = 1000u;
+
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
+}
+
+TEST(PulseReport, ShouldReturnRemainingSecUntilNextReport)
+{
+	fake_timestamp = 1000u;
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1001u;
+
+	UNSIGNED_LONGS_EQUAL(3600u - 1u,
+			pulse_get_sec_until_next_report());
+}
+
+TEST(PulseReport, ShouldReturnZeroSecUntilNextReportWhenIntervalElapsed)
+{
+	fake_timestamp = 1000u;
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
+}
+
+TEST(PulseReport, ShouldReturnZeroSecUntilNextReportAfterTimestampRollback)
+{
+	fake_timestamp = 5000u;
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 100u;
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
+
+	fake_timestamp = 101u;
+	UNSIGNED_LONGS_EQUAL(0u,
+			pulse_get_sec_until_next_report());
+}
+
+TEST(PulseReport, ShouldNotRestartReportWindowWhenQuerySeesTimestampRollback)
+{
+	fake_timestamp = 5000u;
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 100u;
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
+
+	fake_timestamp = 100u + 3600u;
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
+
+	fake_timestamp = 100u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+}
+
+TEST(PulseReport, ShouldReturnZeroSecUntilNextReportWhenTimestampIsZero)
+{
+	fake_timestamp = 1000u;
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 0u;
+
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
+}
+
+TEST(PulseReport, ShouldReturnZeroSecUntilNextReportWhenInFlight)
+{
+	fake_timestamp = 1000u;
+	init_pulse_async();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
+}
+
+TEST(PulseReport, ShouldReturnZeroSecUntilNextReportWhenBacklogPending)
+{
+	fake_timestamp = 1000u;
+	init_pulse_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	metricfs_stub_prime(transmitted_payload, transmitted_payload_len, 1u);
+	fake_timestamp = 1001u;
+
+	UNSIGNED_LONGS_EQUAL(0u, pulse_get_sec_until_next_report());
+}
+
 TEST(PulseReport, ShouldReportWhenIntervalHasElapsed)
 {
 	fake_timestamp = 1000u;

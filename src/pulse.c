@@ -498,6 +498,27 @@ pulse_status_t pulse_set_prepare_handler(pulse_prepare_handler_t handler,
 	return PULSE_STATUS_OK;
 }
 
+uint32_t pulse_get_sec_until_next_report(void)
+{
+	const uint64_t now = metrics_get_unix_timestamp();
+
+	if (!is_initialized() || is_in_flight() || has_backlog() || now == 0u
+			|| !m.periodic_initialized) {
+		return 0u;
+	}
+
+	if (now < get_last_report_time()) {
+		return 0u;
+	}
+
+	const uint64_t elapsed_sec = now - get_last_report_time();
+	if (elapsed_sec >= METRICS_REPORT_INTERVAL_SEC) {
+		return 0u;
+	}
+
+	return METRICS_REPORT_INTERVAL_SEC - elapsed_sec;
+}
+
 pulse_status_t pulse_report(void)
 {
 	if (!is_initialized()) {
