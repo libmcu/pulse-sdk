@@ -147,14 +147,6 @@ static bool is_interval_reached(const uint64_t now)
 	return (now - get_last_report_time()) >= METRICS_REPORT_INTERVAL_SEC;
 }
 
-static uint32_t get_interval_ms(void)
-{
-	const uint64_t interval_ms = (uint64_t)
-		METRICS_REPORT_INTERVAL_SEC * 1000u;
-
-	return interval_ms > UINT32_MAX ? UINT32_MAX : (uint32_t)interval_ms;
-}
-
 static uint32_t sec_to_ms(uint64_t sec)
 {
 	const uint64_t ms = sec * 1000u;
