@@ -317,6 +317,43 @@ static void init_pulse_async_with_mfs(void)
 	pulse_init(&conf);
 }
 
+static void assert_replay_when_live_pre_save_fails(int write_err)
+{
+	metricfs_stub_reset();
+	metrics_reset();
+	init_pulse_with_mfs();
+
+	fake_timestamp = 1000u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EIO);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+
+	uint8_t oldest_payload[1024];
+	size_t oldest_len = metricfs_stub_size();
+	memcpy(oldest_payload, metricfs_stub_data(), oldest_len);
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	metricfs_stub_set_write_error(write_err);
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	LONGS_EQUAL(oldest_len, transmitted_payload_len);
+	MEMCMP_EQUAL(oldest_payload, transmitted_payload, oldest_len);
+	CHECK_EQUAL(0u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+}
+
 TEST_GROUP(PulseReport)
 {
 	void setup()
@@ -1332,6 +1369,24 @@ TEST(PulseReport, ShouldReturnBacklogOverflowWhenBacklogExceedsDerivedPayloadBou
 	CHECK_EQUAL(0u, transmitted_payload_len);
 }
 
+TEST(PulseReport, ShouldAllowLiveReportAfterBacklogOverflow)
+{
+	uint8_t backlog_payload[300];
+	memset(backlog_payload, 0x5A, sizeof(backlog_payload));
+
+	metricfs_stub_prime(backlog_payload, sizeof(backlog_payload), 1u);
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_update_metricfs((struct metricfs *)(uintptr_t)1));
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_OVERFLOW, pulse_report());
+
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_update_metricfs(NULL));
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(7));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+}
+
 TEST(PulseReport, ShouldDeleteBacklogEntryAfterSuccessfulTransmit)
 {
 	init_pulse_with_mfs();
@@ -1516,6 +1571,23 @@ TEST(PulseReport, ShouldSaveElapsedLiveMetricsToBacklogBeforeReplayingOldestBack
 			1000u + 3600u + 3600u, true, 3, false, 0u);
 }
 
+TEST(PulseReport, ShouldReplayExistingBacklogWhenLivePreSaveFails)
+{
+	assert_replay_when_live_pre_save_fails(-ENOBUFS);
+	mock().checkExpectations();
+	mock().clear();
+
+	assert_replay_when_live_pre_save_fails(-EOVERFLOW);
+	mock().checkExpectations();
+	mock().clear();
+
+	assert_replay_when_live_pre_save_fails(-ENOSPC);
+	mock().checkExpectations();
+	mock().clear();
+
+	assert_replay_when_live_pre_save_fails(-ENOENT);
+}
+
 TEST(PulseReport, ShouldReturnIoWhenBacklogPeekFails)
 {
 	static const uint8_t backlog_payload[] = { 0xA1, 0x01, 0x01 };
@@ -1527,6 +1599,24 @@ TEST(PulseReport, ShouldReturnIoWhenBacklogPeekFails)
 	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+}
+
+TEST(PulseReport, ShouldAllowLiveReportAfterBacklogPeekFails)
+{
+	static const uint8_t backlog_payload[] = { 0xA1, 0x01, 0x01 };
+
+	init_pulse_with_mfs();
+	metricfs_stub_prime(backlog_payload, sizeof(backlog_payload), 1u);
+	metricfs_stub_set_peek_first_error(-EIO);
+	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+
+	metricfs_stub_set_peek_first_error(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_update_metricfs(NULL));
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(7));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
 TEST(PulseReport, ShouldClearInFlightOnReinit)

@@ -273,6 +273,8 @@ static pulse_status_t map_metrics_report_error(int err)
 	case -ETIMEDOUT:
 		return PULSE_STATUS_TIMEOUT;
 	case -ENOBUFS: /* fall through */
+	case -ENOENT: /* fall through */
+	case -ENOSPC: /* fall through */
 	case -EOVERFLOW:
 		return PULSE_STATUS_BACKLOG_OVERFLOW;
 	case -ENOSYS:
@@ -308,7 +310,6 @@ static pulse_status_t collect_live_payload(uint8_t reason,
 
 	metrics_len = metrics_collect(m.flight_buf, m.flight_bufsize, &writer);
 	if (metrics_len > m.flight_bufsize) {
-		free_flight_buf();
 		return PULSE_STATUS_OVERFLOW;
 	}
 
@@ -390,17 +391,14 @@ static pulse_status_t collect_from_backlog(void)
 			m.flight_buf, m.flight_bufsize, NULL);
 
 	if (n > (int)m.flight_bufsize) {
-		free_flight_buf();
 		return PULSE_STATUS_BACKLOG_OVERFLOW;
 	}
 
 	if (n == 0) {
-		free_flight_buf();
 		return PULSE_STATUS_EMPTY;
 	}
 
 	if (n < 0) {
-		free_flight_buf();
 		return map_metrics_report_error(n);
 	}
 
@@ -471,17 +469,19 @@ static pulse_status_t do_collect(void)
 
 		if (now != 0u && m.periodic_initialized
 				&& is_interval_reached(now)) {
-			status = save_live_metrics_to_backlog();
-			if (status != PULSE_STATUS_OK) {
-				free_flight_buf();
-				return status;
-			}
+			(void)save_live_metrics_to_backlog();
 		}
 
-		return collect_from_backlog();
+		status = collect_from_backlog();
+	} else {
+		status = collect_from_live_metrics();
 	}
 
-	return collect_from_live_metrics();
+	if (status != PULSE_STATUS_OK) {
+		free_flight_buf();
+	}
+
+	return status;
 }
 
 static pulse_status_t do_transmit(void)

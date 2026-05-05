@@ -18,6 +18,7 @@ static uint8_t stored_data[METRICFS_STUB_MAX_ENTRIES][1024];
 static size_t stored_size[METRICFS_STUB_MAX_ENTRIES];
 static uint16_t stored_count;
 static int peek_first_error;
+static int write_error;
 
 static uint16_t stored_entry_count(void)
 {
@@ -39,6 +40,7 @@ void metricfs_stub_reset(void)
 	memset(stored_size, 0, sizeof(stored_size));
 	stored_count = 0;
 	peek_first_error = 0;
+	write_error = 0;
 }
 
 void metricfs_stub_prime(const void *data, size_t datasize, uint16_t count)
@@ -57,6 +59,11 @@ void metricfs_stub_prime(const void *data, size_t datasize, uint16_t count)
 void metricfs_stub_set_peek_first_error(int err)
 {
 	peek_first_error = err;
+}
+
+void metricfs_stub_set_write_error(int err)
+{
+	write_error = err;
 }
 
 const void *metricfs_stub_data(void)
@@ -87,6 +94,10 @@ int metricfs_write(struct metricfs *fs,
 		const void *data, const size_t datasize, metricfs_id_t *id)
 {
 	(void)fs;
+	if (write_error != 0) {
+		return write_error;
+	}
+
 	if (stored_count >= METRICFS_STUB_MAX_ENTRIES) {
 		return -ENOBUFS;
 	}
