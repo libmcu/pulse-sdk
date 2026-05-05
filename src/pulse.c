@@ -131,6 +131,15 @@ static uint64_t get_last_report_time(void)
 	return m.last_report_time;
 }
 
+static void finalize_live_metrics_snapshot(uint64_t timestamp)
+{
+	metrics_reset();
+	if (timestamp != 0u) {
+		set_last_report_time(timestamp);
+		m.periodic_initialized = true;
+	}
+}
+
 static bool is_interval_reached(const uint64_t now)
 {
 	if (now == 0u) {
@@ -338,11 +347,7 @@ static pulse_status_t abort_flight(int transmit_err)
 		if (status == PULSE_STATUS_OK && m.flight_len > 0u &&
 				metricfs_write(m.conf.mfs, m.flight_buf,
 						m.flight_len, NULL) == 0) {
-			metrics_reset();
-			if (m.flight_window_end != 0u) {
-				set_last_report_time(m.flight_window_end);
-				m.periodic_initialized = true;
-			}
+			finalize_live_metrics_snapshot(m.flight_window_end);
 			saved_to_backlog = true;
 		} else if (status != PULSE_STATUS_OK) {
 			clear_in_flight();
@@ -367,14 +372,8 @@ static pulse_status_t commit_flight(void)
 
 	if (m.flight_from_backlog) {
 		err = metricfs_del_first(m.conf.mfs, NULL);
-	} else {
-		metrics_reset();
-
-		uint64_t now = metrics_get_unix_timestamp();
-		if (now != 0u) {
-			set_last_report_time(now);
-			m.periodic_initialized = true;
-		}
+	} else if (!live_saved_during_flight) {
+		finalize_live_metrics_snapshot(metrics_get_unix_timestamp());
 	}
 
 	clear_in_flight();
@@ -438,11 +437,7 @@ static pulse_status_t write_live_metrics_to_backlog(void)
 		return map_metrics_report_error(err);
 	}
 
-	metrics_reset();
-	if (m.flight_window_end != 0u) {
-		set_last_report_time(m.flight_window_end);
-		m.periodic_initialized = true;
-	}
+	finalize_live_metrics_snapshot(m.flight_window_end);
 
 	return PULSE_STATUS_OK;
 }

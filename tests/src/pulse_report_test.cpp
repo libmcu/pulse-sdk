@@ -1715,6 +1715,53 @@ TEST(PulseReport, ShouldSaveElapsedLiveMetricsToBacklogBeforeCompletingInFlightR
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 }
 
+TEST(PulseReport, ShouldPreserveMetricsRecordedAfterInFlightLivePreSave)
+{
+	fake_timestamp = 1000u;
+	init_pulse_async_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+
+	metrics_set(PulseMetric, METRICS_VALUE(4));
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_report());
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+	assert_envelope_payload_with_window(transmitted_payload, transmitted_payload_len,
+			1000u + 3600u + 3600u + 3600u, 1000u + 3600u + 3600u,
+			1000u + 3600u + 3600u + 3600u, true, 4, false, 0u);
+}
+
 TEST(PulseReport, ShouldClearInFlightOnReinit)
 {
 	init_pulse_async();
