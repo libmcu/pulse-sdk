@@ -112,6 +112,7 @@ static void free_flight_buf(void)
 	m.flight_window_end = 0u;
 	m.flight_reason = PULSE_SNAPSHOT_REASON_LIVE;
 	m.flight_from_backlog = false;
+	m.live_saved_during_flight = false;
 }
 
 static void clear_in_flight(void)
@@ -361,6 +362,7 @@ static pulse_status_t abort_flight(int transmit_err)
 static pulse_status_t commit_flight(void)
 {
 	const bool was_from_backlog = m.flight_from_backlog;
+	const bool live_saved_during_flight = m.live_saved_during_flight;
 	int err = 0;
 
 	if (m.flight_from_backlog) {
@@ -381,7 +383,7 @@ static pulse_status_t commit_flight(void)
 		return map_metrics_report_error(err);
 	}
 
-	return (was_from_backlog && has_backlog())
+	return ((was_from_backlog || live_saved_during_flight) && has_backlog())
 		? PULSE_STATUS_BACKLOG_PENDING : PULSE_STATUS_OK;
 }
 
@@ -423,7 +425,7 @@ static pulse_status_t collect_from_live_metrics(void)
 	return PULSE_STATUS_OK;
 }
 
-static pulse_status_t save_live_metrics_to_backlog(void)
+static pulse_status_t write_live_metrics_to_backlog(void)
 {
 	pulse_status_t status =
 		collect_live_payload(PULSE_SNAPSHOT_REASON_LIVE, true);
@@ -443,6 +445,52 @@ static pulse_status_t save_live_metrics_to_backlog(void)
 	}
 
 	return PULSE_STATUS_OK;
+}
+
+static pulse_status_t save_live_metrics_to_backlog(void)
+{
+	if (!is_in_flight()) {
+		return write_live_metrics_to_backlog();
+	}
+
+	uint8_t *const saved_buf = (uint8_t *)malloc(m.flight_len);
+	if (saved_buf == NULL) {
+		return PULSE_STATUS_NO_MEMORY;
+	}
+
+	const size_t saved_len = m.flight_len;
+	const uint64_t saved_window_start = m.flight_window_start;
+	const uint64_t saved_window_end = m.flight_window_end;
+	const uint8_t saved_reason = m.flight_reason;
+	const bool saved_from_backlog = m.flight_from_backlog;
+	const uint64_t saved_last_report_time = get_last_report_time();
+	const bool saved_periodic_initialized = m.periodic_initialized;
+
+	memcpy(saved_buf, m.flight_buf, saved_len);
+	if (!saved_from_backlog && saved_window_end != 0u) {
+		set_last_report_time(saved_window_end);
+		m.periodic_initialized = true;
+	}
+
+	pulse_status_t status = write_live_metrics_to_backlog();
+	if (status == PULSE_STATUS_OK && !saved_from_backlog) {
+		m.live_saved_during_flight = true;
+	}
+	if (status != PULSE_STATUS_OK) {
+		set_last_report_time(saved_last_report_time);
+		m.periodic_initialized = saved_periodic_initialized;
+	}
+
+	memcpy(m.flight_buf, saved_buf, saved_len);
+	free(saved_buf);
+
+	m.flight_len = saved_len;
+	m.flight_window_start = saved_window_start;
+	m.flight_window_end = saved_window_end;
+	m.flight_reason = saved_reason;
+	m.flight_from_backlog = saved_from_backlog;
+
+	return status;
 }
 
 static pulse_status_t do_collect(void)
@@ -563,6 +611,11 @@ pulse_status_t pulse_report(void)
 	}
 
 	if (is_in_flight()) {
+		const uint64_t now = metrics_get_unix_timestamp();
+		if (now && m.periodic_initialized && is_interval_reached(now)) {
+			(void)save_live_metrics_to_backlog();
+		}
+
 		return do_transmit();
 	}
 
@@ -656,6 +709,7 @@ pulse_status_t pulse_init(struct pulse *pulse)
 	m.response_ctx = NULL;
 	m.on_prepare = NULL;
 	m.prepare_ctx = NULL;
+	m.live_saved_during_flight = false;
 	m.periodic_initialized = false;
 	force_reset = pulse->reset_metrics_on_init;
 	set_last_report_time(0u);
