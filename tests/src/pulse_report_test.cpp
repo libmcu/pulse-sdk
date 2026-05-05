@@ -8,6 +8,7 @@ extern "C" {
 #include <stdint.h>
 #include <string.h>
 
+#include <libmcu/metricfs.h>
 #include <libmcu/metrics.h>
 
 #include "pulse/pulse.h"
@@ -686,6 +687,16 @@ TEST(PulseReport, ShouldReturnNonNullForAllStatusStringConversions)
 	CHECK_TRUE(pulse_stringify_status(PULSE_STATUS_NO_MEMORY) != NULL);
 	CHECK_TRUE(pulse_stringify_status(PULSE_STATUS_IN_PROGRESS) != NULL);
 	CHECK_TRUE(pulse_stringify_status((pulse_status_t)-99) != NULL);
+}
+
+TEST(PulseReport, ShouldRejectOversizedMetricfsStubWriteWithoutCountingEntry)
+{
+	uint8_t oversized_payload[1025];
+	memset(oversized_payload, 0xA5, sizeof(oversized_payload));
+
+	CHECK_EQUAL(-EOVERFLOW, metricfs_write((struct metricfs *)(uintptr_t)1,
+			oversized_payload, sizeof(oversized_payload), NULL));
+	CHECK_EQUAL(0u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 }
 
 TEST(PulseReport, ShouldReturnInProgressWhenAsyncTransportReturnedEinprogress)

@@ -102,7 +102,11 @@ int metricfs_write(struct metricfs *fs,
 		return -ENOBUFS;
 	}
 
-	if (data != NULL && datasize <= sizeof(stored_data[stored_count])) {
+	if (datasize > sizeof(stored_data[stored_count])) {
+		return -EOVERFLOW;
+	}
+
+	if (data != NULL) {
 		memcpy(stored_data[stored_count], data, datasize);
 		stored_size[stored_count] = datasize;
 	}
