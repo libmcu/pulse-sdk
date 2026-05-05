@@ -523,8 +523,7 @@ uint32_t pulse_get_ms_until_next_report(void)
 	}
 
 	if (now < get_last_report_time()) {
-		set_last_report_time(now);
-		return get_interval_ms();
+		return 0u;
 	}
 
 	const uint64_t elapsed_sec = now - get_last_report_time();

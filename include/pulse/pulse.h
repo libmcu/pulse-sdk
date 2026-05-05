@@ -201,7 +201,8 @@ pulse_status_t pulse_report(void);
  *
  * Returns 0 when the module is not initialized, when a live report may be
  * attempted immediately, when backlog or in-flight transfer handling can
- * proceed, or when timestamp-based periodic gating is not active. A return
+ * proceed, when timestamp-based periodic gating is not active, or when a
+ * timestamp rollback requires pulse_report() to reconcile state. A return
  * value of 0 does not imply that pulse_report() will succeed.
  *
  * @return Milliseconds until the next live report window.
