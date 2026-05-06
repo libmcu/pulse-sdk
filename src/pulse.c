@@ -157,6 +157,20 @@ static bool is_interval_reached(const uint64_t now)
 	return (now - get_last_report_time()) >= METRICS_REPORT_INTERVAL_SEC;
 }
 
+static bool is_live_presave_interval_reached(const uint64_t now)
+{
+	if (is_in_flight() && !m.flight_from_backlog &&
+			m.flight_window_end != 0u) {
+		if (now < m.flight_window_end) {
+			return false;
+		}
+
+		return (now - m.flight_window_end) >= METRICS_REPORT_INTERVAL_SEC;
+	}
+
+	return is_interval_reached(now);
+}
+
 static void invoke_prepare_chain(void)
 {
 	if (m.on_prepare != NULL) {
@@ -539,7 +553,7 @@ static pulse_status_t do_collect(void)
 		const uint64_t now = metrics_get_unix_timestamp();
 
 		if (now != 0u && m.periodic_initialized
-				&& is_interval_reached(now)) {
+				&& is_live_presave_interval_reached(now)) {
 			(void)save_live_metrics_to_backlog();
 		}
 
@@ -636,7 +650,8 @@ pulse_status_t pulse_report(void)
 	if (is_in_flight()) {
 		const uint64_t now = metrics_get_unix_timestamp();
 		if (now && m.conf.mfs != NULL && m.periodic_initialized
-				&& is_interval_reached(now)) {
+				&& !m.live_saved_during_flight
+				&& is_live_presave_interval_reached(now)) {
 			(void)save_live_metrics_to_backlog();
 		}
 
