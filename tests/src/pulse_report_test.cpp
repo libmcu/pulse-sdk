@@ -1671,6 +1671,34 @@ TEST(PulseReport, ShouldAllowLiveReportAfterBacklogPeekFails)
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
+TEST(PulseReport, ShouldNotSaveElapsedLiveMetricsWhenMetricfsDisabledDuringInFlight)
+{
+	fake_timestamp = 1000u;
+	init_pulse_async();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	CHECK_EQUAL(0u, metricfs_count(NULL));
+}
+
 TEST(PulseReport, ShouldSaveElapsedLiveMetricsToBacklogBeforeCompletingInFlightReport)
 {
 	int prepare_ctx = 2;

@@ -635,7 +635,8 @@ pulse_status_t pulse_report(void)
 
 	if (is_in_flight()) {
 		const uint64_t now = metrics_get_unix_timestamp();
-		if (now && m.periodic_initialized && is_interval_reached(now)) {
+		if (now && m.conf.mfs != NULL && m.periodic_initialized
+				&& is_interval_reached(now)) {
 			(void)save_live_metrics_to_backlog();
 		}
 
