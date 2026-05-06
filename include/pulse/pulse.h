@@ -33,11 +33,12 @@ typedef enum {
 	 * the next scheduled call will proceed normally. */
 	PULSE_STATUS_TOO_SOON		= -7,
 	PULSE_STATUS_EMPTY		= -8,
-	/* A backlog entry was delivered and more entries remain, or an
-	 * in-progress transfer was cancelled and the snapshot was saved
-	 * to the backlog. Call @ref pulse_report() again to continue
-	 * draining. Transport errors return the matching error code
-	 * instead so the caller can apply appropriate backoff. */
+	/* A backlog entry was delivered and more entries remain, an
+	 * in-progress transfer completed after saving elapsed live metrics
+	 * to the backlog, or an in-progress transfer was cancelled and the
+	 * snapshot was saved to the backlog. Call @ref pulse_report() again
+	 * to continue draining. Transport errors return the matching error
+	 * code instead so the caller can apply appropriate backoff. */
 	PULSE_STATUS_BACKLOG_PENDING	= -9,
 	/* A backlog entry's stored payload exceeds the transmit buffer size
 	 * (e.g. written under a different schema or a larger payload). The
@@ -47,8 +48,9 @@ typedef enum {
 	PULSE_STATUS_BACKLOG_OVERFLOW	= -10,
 	PULSE_STATUS_NO_MEMORY		= -11,
 	/* Returned when an async transport is still in progress. The caller
-	 * must invoke pulse_report() again to advance the transfer.
-	 * No backlog entry was written. */
+	 * must invoke pulse_report() again to advance the transfer. If a
+	 * report interval elapsed while the transfer was in progress, live
+	 * metrics may have been saved to the backlog before retrying. */
 	PULSE_STATUS_IN_PROGRESS	= -12,
 } pulse_status_t;
 

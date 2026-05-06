@@ -8,6 +8,7 @@ extern "C" {
 #include <stdint.h>
 #include <string.h>
 
+#include <libmcu/metricfs.h>
 #include <libmcu/metrics.h>
 
 #include "pulse/pulse.h"
@@ -223,9 +224,10 @@ static void assert_metric_payload_matches(const uint8_t *payload, size_t payload
 	UNSIGNED_LONGS_EQUAL(payload_len, cursor.pos);
 }
 
-static void assert_envelope_payload(const uint8_t *payload, size_t payload_len,
-		uint64_t expected_timestamp, bool has_metrics, int32_t expected_metric_value,
-		bool has_reason, uint8_t expected_reason)
+static void assert_envelope_payload_with_window(const uint8_t *payload, size_t payload_len,
+		uint64_t expected_timestamp, uint64_t expected_window_start,
+		uint64_t expected_window_end, bool has_metrics,
+		int32_t expected_metric_value, bool has_reason, uint8_t expected_reason)
 {
 	struct cbor_cursor cursor = { payload, payload_len, 0u };
 	const size_t expected_report_entries = (expected_timestamp != 0u ? 3u : 0u)
@@ -249,9 +251,9 @@ static void assert_envelope_payload(const uint8_t *payload, size_t payload_len,
 		UNSIGNED_LONGS_EQUAL(0u, cbor_read_uint(&cursor));
 		UNSIGNED_LONGS_EQUAL(expected_timestamp, cbor_read_uint(&cursor));
 		UNSIGNED_LONGS_EQUAL(1u, cbor_read_uint(&cursor));
-		UNSIGNED_LONGS_EQUAL(expected_timestamp, cbor_read_uint(&cursor));
+		UNSIGNED_LONGS_EQUAL(expected_window_start, cbor_read_uint(&cursor));
 		UNSIGNED_LONGS_EQUAL(2u, cbor_read_uint(&cursor));
-		UNSIGNED_LONGS_EQUAL(expected_timestamp, cbor_read_uint(&cursor));
+		UNSIGNED_LONGS_EQUAL(expected_window_end, cbor_read_uint(&cursor));
 	}
 
 	if (has_reason) {
@@ -266,6 +268,15 @@ static void assert_envelope_payload(const uint8_t *payload, size_t payload_len,
 	}
 
 	UNSIGNED_LONGS_EQUAL(payload_len, cursor.pos);
+}
+
+static void assert_envelope_payload(const uint8_t *payload, size_t payload_len,
+		uint64_t expected_timestamp, bool has_metrics, int32_t expected_metric_value,
+		bool has_reason, uint8_t expected_reason)
+{
+	assert_envelope_payload_with_window(payload, payload_len,
+			expected_timestamp, expected_timestamp, expected_timestamp,
+			has_metrics, expected_metric_value, has_reason, expected_reason);
 }
 
 static struct pulse make_pulse_conf(void)
@@ -305,6 +316,43 @@ static void init_pulse_async_with_mfs(void)
 	conf.mfs = (struct metricfs *)(uintptr_t)1;
 	conf.async_transport = true;
 	pulse_init(&conf);
+}
+
+static void assert_replay_when_live_pre_save_fails(int write_err)
+{
+	metricfs_stub_reset();
+	metrics_reset();
+	init_pulse_with_mfs();
+
+	fake_timestamp = 1000u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EIO);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+
+	uint8_t oldest_payload[1024];
+	size_t oldest_len = metricfs_stub_size();
+	memcpy(oldest_payload, metricfs_stub_data(), oldest_len);
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	metricfs_stub_set_write_error(write_err);
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	LONGS_EQUAL(oldest_len, transmitted_payload_len);
+	MEMCMP_EQUAL(oldest_payload, transmitted_payload, oldest_len);
+	CHECK_EQUAL(0u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 }
 
 TEST_GROUP(PulseReport)
@@ -639,6 +687,16 @@ TEST(PulseReport, ShouldReturnNonNullForAllStatusStringConversions)
 	CHECK_TRUE(pulse_stringify_status(PULSE_STATUS_NO_MEMORY) != NULL);
 	CHECK_TRUE(pulse_stringify_status(PULSE_STATUS_IN_PROGRESS) != NULL);
 	CHECK_TRUE(pulse_stringify_status((pulse_status_t)-99) != NULL);
+}
+
+TEST(PulseReport, ShouldRejectOversizedMetricfsStubWriteWithoutCountingEntry)
+{
+	uint8_t oversized_payload[1025];
+	memset(oversized_payload, 0xA5, sizeof(oversized_payload));
+
+	CHECK_EQUAL(-EOVERFLOW, metricfs_write((struct metricfs *)(uintptr_t)1,
+			oversized_payload, sizeof(oversized_payload), NULL));
+	CHECK_EQUAL(0u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 }
 
 TEST(PulseReport, ShouldReturnInProgressWhenAsyncTransportReturnedEinprogress)
@@ -1322,6 +1380,24 @@ TEST(PulseReport, ShouldReturnBacklogOverflowWhenBacklogExceedsDerivedPayloadBou
 	CHECK_EQUAL(0u, transmitted_payload_len);
 }
 
+TEST(PulseReport, ShouldAllowLiveReportAfterBacklogOverflow)
+{
+	uint8_t backlog_payload[300];
+	memset(backlog_payload, 0x5A, sizeof(backlog_payload));
+
+	metricfs_stub_prime(backlog_payload, sizeof(backlog_payload), 1u);
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_update_metricfs((struct metricfs *)(uintptr_t)1));
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_OVERFLOW, pulse_report());
+
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_update_metricfs(NULL));
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(7));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+}
+
 TEST(PulseReport, ShouldDeleteBacklogEntryAfterSuccessfulTransmit)
 {
 	init_pulse_with_mfs();
@@ -1469,6 +1545,101 @@ TEST(PulseReport, ShouldBypassTimingGateWhenBacklogExists)
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 }
 
+TEST(PulseReport, ShouldSaveElapsedLiveMetricsToBacklogBeforeReplayingOldestBacklog)
+{
+	fake_timestamp = 1000u;
+	init_pulse_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EIO);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+
+	uint8_t oldest_payload[1024];
+	size_t oldest_len = metricfs_stub_size();
+	memcpy(oldest_payload, metricfs_stub_data(), oldest_len);
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_report());
+
+	LONGS_EQUAL(oldest_len, transmitted_payload_len);
+	MEMCMP_EQUAL(oldest_payload, transmitted_payload, oldest_len);
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	assert_envelope_payload_with_window((const uint8_t *)metricfs_stub_data(),
+			metricfs_stub_size(), 1000u + 3600u + 3600u, 1000u + 3600u,
+			1000u + 3600u + 3600u, true, 3, false, 0u);
+}
+
+TEST(PulseReport, ShouldCallPrepareHandlerBeforeSavingLiveMetricsDuringBacklogReplay)
+{
+	int prepare_ctx = 2;
+	struct pulse conf = make_pulse_conf();
+	conf.mfs = (struct metricfs *)(uintptr_t)1;
+
+	fake_timestamp = 1000u;
+	pulse_init(&conf);
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_set_prepare_handler(prepare_handler, &prepare_ctx));
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EIO);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+
+	prepare_handler_calls = 0u;
+	prepare_order = 0u;
+	prepare_handler_order = 0u;
+	last_prepare_handler_ctx = NULL;
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_report());
+
+	CHECK_EQUAL(1u, prepare_handler_calls);
+	POINTERS_EQUAL(&prepare_ctx, last_prepare_handler_ctx);
+	CHECK_EQUAL(1u, prepare_handler_order);
+}
+
+TEST(PulseReport, ShouldReplayExistingBacklogWhenLivePreSaveFails)
+{
+	assert_replay_when_live_pre_save_fails(-ENOBUFS);
+	mock().checkExpectations();
+	mock().clear();
+
+	assert_replay_when_live_pre_save_fails(-EOVERFLOW);
+	mock().checkExpectations();
+	mock().clear();
+
+	assert_replay_when_live_pre_save_fails(-ENOSPC);
+	mock().checkExpectations();
+	mock().clear();
+
+	assert_replay_when_live_pre_save_fails(-ENOENT);
+}
+
 TEST(PulseReport, ShouldReturnIoWhenBacklogPeekFails)
 {
 	static const uint8_t backlog_payload[] = { 0xA1, 0x01, 0x01 };
@@ -1480,6 +1651,228 @@ TEST(PulseReport, ShouldReturnIoWhenBacklogPeekFails)
 	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+}
+
+TEST(PulseReport, ShouldAllowLiveReportAfterBacklogPeekFails)
+{
+	static const uint8_t backlog_payload[] = { 0xA1, 0x01, 0x01 };
+
+	init_pulse_with_mfs();
+	metricfs_stub_prime(backlog_payload, sizeof(backlog_payload), 1u);
+	metricfs_stub_set_peek_first_error(-EIO);
+	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+
+	metricfs_stub_set_peek_first_error(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_update_metricfs(NULL));
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(7));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+}
+
+TEST(PulseReport, ShouldNotSaveElapsedLiveMetricsWhenMetricfsDisabledDuringInFlight)
+{
+	fake_timestamp = 1000u;
+	init_pulse_async();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	CHECK_EQUAL(0u, metricfs_count(NULL));
+}
+
+TEST(PulseReport, ShouldSaveElapsedLiveMetricsToBacklogBeforeCompletingInFlightReport)
+{
+	int prepare_ctx = 2;
+
+	fake_timestamp = 1000u;
+	init_pulse_async_with_mfs();
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_set_prepare_handler(prepare_handler, &prepare_ctx));
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	uint8_t in_flight_payload[1024];
+	size_t in_flight_len = transmitted_payload_len;
+	CHECK_TRUE(in_flight_len <= sizeof(in_flight_payload));
+	memcpy(in_flight_payload, transmitted_payload, in_flight_len);
+
+	prepare_handler_calls = 0u;
+	prepare_order = 0u;
+	prepare_handler_order = 0u;
+	last_prepare_handler_ctx = NULL;
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	LONGS_EQUAL(in_flight_len, transmitted_payload_len);
+	MEMCMP_EQUAL(in_flight_payload, transmitted_payload, in_flight_len);
+	CHECK_EQUAL(1u, prepare_handler_calls);
+	POINTERS_EQUAL(&prepare_ctx, last_prepare_handler_ctx);
+	CHECK_EQUAL(1u, prepare_handler_order);
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	assert_envelope_payload_with_window((const uint8_t *)metricfs_stub_data(),
+			metricfs_stub_size(), 1000u + 3600u + 3600u, 1000u + 3600u,
+			1000u + 3600u + 3600u, true, 3, false, 0u);
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_report());
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+}
+
+TEST(PulseReport, ShouldSaveOriginalLiveFlightWhenAbortFollowsLivePreSave)
+{
+	fake_timestamp = 1000u;
+	init_pulse_async_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	uint8_t in_flight_payload[1024];
+	size_t in_flight_len = transmitted_payload_len;
+	CHECK_TRUE(in_flight_len <= sizeof(in_flight_payload));
+	memcpy(in_flight_payload, transmitted_payload, in_flight_len);
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EIO);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+
+	CHECK_EQUAL(2u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	CHECK_EQUAL(0, metricfs_del_first((struct metricfs *)(uintptr_t)1, NULL));
+	LONGS_EQUAL(in_flight_len, metricfs_stub_size());
+	MEMCMP_EQUAL(in_flight_payload, metricfs_stub_data(), in_flight_len);
+}
+
+TEST(PulseReport, ShouldSaveOriginalLiveFlightWhenCancelFollowsLivePreSave)
+{
+	fake_timestamp = 1000u;
+	init_pulse_async_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	uint8_t in_flight_payload[1024];
+	size_t in_flight_len = transmitted_payload_len;
+	CHECK_TRUE(in_flight_len <= sizeof(in_flight_payload));
+	memcpy(in_flight_payload, transmitted_payload, in_flight_len);
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_cancel());
+	CHECK_EQUAL(2u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	CHECK_EQUAL(0, metricfs_del_first((struct metricfs *)(uintptr_t)1, NULL));
+	LONGS_EQUAL(in_flight_len, metricfs_stub_size());
+	MEMCMP_EQUAL(in_flight_payload, metricfs_stub_data(), in_flight_len);
+}
+
+TEST(PulseReport, ShouldPreserveMetricsRecordedAfterInFlightLivePreSave)
+{
+	fake_timestamp = 1000u;
+	init_pulse_async_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+
+	metrics_set(PulseMetric, METRICS_VALUE(4));
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_report());
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+	assert_envelope_payload_with_window(transmitted_payload, transmitted_payload_len,
+			1000u + 3600u + 3600u + 3600u, 1000u + 3600u + 3600u,
+			1000u + 3600u + 3600u + 3600u, true, 4, false, 0u);
 }
 
 TEST(PulseReport, ShouldClearInFlightOnReinit)
@@ -1641,6 +2034,38 @@ TEST(PulseReport, ShouldNotCallPrepareHandlerAgainWhenCancelSavesBacklog)
 	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_cancel());
 
 	CHECK_EQUAL(0u, prepare_handler_calls);
+}
+
+TEST(PulseReport, ShouldAdvanceWindowBoundaryWhenCancelSavesBacklog)
+{
+	fake_timestamp = 1000u;
+	init_pulse_async_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_cancel());
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_report());
+
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	assert_envelope_payload_with_window((const uint8_t *)metricfs_stub_data(),
+			metricfs_stub_size(), 1000u + 3600u + 3600u, 1000u + 3600u,
+			1000u + 3600u + 3600u, true, 3, false, 0u);
 }
 
 TEST(PulseReport, ShouldNotSaveToBacklogOnCancelWhenMfsNotAvailable)
