@@ -334,22 +334,50 @@ static pulse_status_t collect_live_payload(uint8_t reason,
 			metrics_len, &ctx, &m.flight_len);
 }
 
-static pulse_status_t abort_flight(int transmit_err)
+static bool save_current_flight_to_backlog(void)
 {
-	bool saved_to_backlog = false;
-	pulse_status_t status;
+	return m.flight_len > 0u && metricfs_write(m.conf.mfs,
+			m.flight_buf, m.flight_len, NULL) == 0;
+}
+
+static pulse_status_t save_aborted_flight_to_backlog(int txn_err, bool *saved)
+{
+	if (m.live_saved_during_flight) {
+		/* Preserve the original in-flight payload as-is. This keeps
+		 * its LIVE reason and may append it after newer backlog data.
+		 * A fuller fix should store the original payload separately
+		 * from the mutable flight buffer, then rebuild or annotate that
+		 * payload with BACKLOG_FAILURE/BACKLOG_CANCEL before enqueueing
+		 * it in chronological order, without re-collecting from the
+		 * already-reset metrics store. */
+		*saved = save_current_flight_to_backlog();
+		return PULSE_STATUS_OK;
+	}
+
+	pulse_status_t status = collect_live_payload((txn_err == -ECANCELED)
+			? PULSE_SNAPSHOT_REASON_BACKLOG_CANCEL
+			: PULSE_SNAPSHOT_REASON_BACKLOG_FAILURE,
+		false);
+	if (status != PULSE_STATUS_OK) {
+		return status;
+	}
+
+	*saved = save_current_flight_to_backlog();
+	if (*saved) {
+		finalize_live_metrics_snapshot(m.flight_window_end);
+	}
+
+	return PULSE_STATUS_OK;
+}
+
+static pulse_status_t abort_flight(int txn_err)
+{
+	bool saved = false;
 
 	if (!m.flight_from_backlog && m.conf.mfs != NULL) {
-		status = collect_live_payload((transmit_err == -ECANCELED)
-					? PULSE_SNAPSHOT_REASON_BACKLOG_CANCEL
-					: PULSE_SNAPSHOT_REASON_BACKLOG_FAILURE,
-				false);
-		if (status == PULSE_STATUS_OK && m.flight_len > 0u &&
-				metricfs_write(m.conf.mfs, m.flight_buf,
-						m.flight_len, NULL) == 0) {
-			finalize_live_metrics_snapshot(m.flight_window_end);
-			saved_to_backlog = true;
-		} else if (status != PULSE_STATUS_OK) {
+		const pulse_status_t status =
+			save_aborted_flight_to_backlog(txn_err, &saved);
+		if (status != PULSE_STATUS_OK) {
 			clear_in_flight();
 			return status;
 		}
@@ -357,11 +385,11 @@ static pulse_status_t abort_flight(int transmit_err)
 
 	clear_in_flight();
 
-	if (saved_to_backlog && transmit_err == -ECANCELED) {
+	if (saved && txn_err == -ECANCELED) {
 		return PULSE_STATUS_BACKLOG_PENDING;
 	}
 
-	return map_metrics_report_error(transmit_err);
+	return map_metrics_report_error(txn_err);
 }
 
 static pulse_status_t commit_flight(void)
