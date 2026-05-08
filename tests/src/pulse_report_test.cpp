@@ -7,6 +7,7 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 #include <libmcu/metricfs.h>
 #include <libmcu/metrics.h>
@@ -15,6 +16,14 @@ extern "C" {
 #include "pulse/pulse_internal.h"
 #include "metricfs_stub.h"
 }
+
+#if !defined(PULSE_RATELIM_CAPACITY)
+#define PULSE_RATELIM_CAPACITY	10u
+#endif
+
+#if !defined(PULSE_RATELIM_LEAK_RATE)
+#define PULSE_RATELIM_LEAK_RATE	10u
+#endif
 
 static uint8_t transmitted_payload[1024];
 static size_t transmitted_payload_len;
@@ -32,6 +41,8 @@ static unsigned int prepare_handler_calls;
 static unsigned int prepare_order;
 static unsigned int prepare_handler_order;
 static void *last_prepare_handler_ctx;
+static time_t fake_time_value;
+static unsigned int transport_calls;
 
 extern "C" void pulse_transport_cancel(void);
 
@@ -40,9 +51,16 @@ extern "C" uint64_t metrics_get_unix_timestamp(void)
 	return fake_timestamp;
 }
 
+extern "C" time_t time(time_t *t)
+{
+	(void)t;
+	return fake_time_value;
+}
+
 extern "C" int pulse_transport_transmit(const void *data, size_t datasize,
 		const struct pulse_report_ctx *ctx)
 {
+	transport_calls++;
 	last_transmit_ctx = ctx;
 
 	if (datasize <= sizeof(transmitted_payload)) {
@@ -391,6 +409,8 @@ TEST_GROUP(PulseReport)
 		prepare_order = 0u;
 		prepare_handler_order = 0u;
 		last_prepare_handler_ctx = NULL;
+		fake_time_value = 0;
+		transport_calls = 0u;
 		metricfs_stub_reset();
 		metrics_reset();
 
@@ -759,7 +779,114 @@ TEST(PulseReport, ShouldReturnNonNullForAllStatusStringConversions)
 	CHECK_TRUE(pulse_stringify_status(PULSE_STATUS_BACKLOG_OVERFLOW) != NULL);
 	CHECK_TRUE(pulse_stringify_status(PULSE_STATUS_NO_MEMORY) != NULL);
 	CHECK_TRUE(pulse_stringify_status(PULSE_STATUS_IN_PROGRESS) != NULL);
+	CHECK_TRUE(pulse_stringify_status(PULSE_STATUS_THROTTLED) != NULL);
 	CHECK_TRUE(pulse_stringify_status((pulse_status_t)-99) != NULL);
+}
+
+TEST(PulseReport, ShouldReturnThrottledWhenRateLimitExceededForLiveReport)
+{
+#if PULSE_RATELIM_CAPACITY > 0u && PULSE_RATELIM_LEAK_RATE > 0u
+	fake_time_value = 1000;
+
+	for (unsigned int i = 0u; i < (unsigned int)PULSE_RATELIM_CAPACITY; ++i) {
+		mock().expectOneCall("pulse_transport_transmit")
+			.ignoreOtherParameters()
+			.andReturnValue(0);
+		CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+	}
+
+	CHECK_EQUAL(PULSE_STATUS_THROTTLED, pulse_report());
+#else
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+#endif
+}
+
+TEST(PulseReport, ShouldReturnThrottledWhenRateLimitExceededForBacklogReplay)
+{
+#if PULSE_RATELIM_CAPACITY > 0u && PULSE_RATELIM_LEAK_RATE > 0u
+	fake_time_value = 2000;
+	init_pulse_with_mfs();
+
+	static const uint8_t backlog_payload[] = { 0xA1, 0x01, 0x01 };
+
+	for (unsigned int i = 0u; i < (unsigned int)PULSE_RATELIM_CAPACITY; ++i) {
+		metricfs_stub_prime(backlog_payload, sizeof(backlog_payload), 1u);
+		mock().expectOneCall("pulse_transport_transmit")
+			.ignoreOtherParameters()
+			.andReturnValue(0);
+		CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+		CHECK_EQUAL(0u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+		CHECK_TRUE(transmitted_payload_len > 0u);
+		transmitted_payload_len = 0u;
+	}
+
+	metricfs_stub_prime(backlog_payload, sizeof(backlog_payload), 1u);
+	CHECK_EQUAL(PULSE_STATUS_THROTTLED, pulse_report());
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	CHECK_EQUAL(0u, transmitted_payload_len);
+#else
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+#endif
+}
+
+TEST(PulseReport, ShouldNotTransmitWhenRateLimited)
+{
+#if PULSE_RATELIM_CAPACITY > 0u && PULSE_RATELIM_LEAK_RATE > 0u
+	fake_time_value = 3000;
+
+	for (unsigned int i = 0u; i < (unsigned int)PULSE_RATELIM_CAPACITY; ++i) {
+		mock().expectOneCall("pulse_transport_transmit")
+			.ignoreOtherParameters()
+			.andReturnValue(0);
+		pulse_report();
+	}
+
+	const unsigned int calls_before = transport_calls;
+	transmitted_payload_len = 0u;
+	CHECK_EQUAL(PULSE_STATUS_THROTTLED, pulse_report());
+	CHECK_EQUAL(calls_before, transport_calls);
+	CHECK_EQUAL(0u, transmitted_payload_len);
+#else
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+#endif
+}
+
+TEST(PulseReport, ShouldNotCallPrepareHandlerWhenRateLimited)
+{
+#if PULSE_RATELIM_CAPACITY > 0u && PULSE_RATELIM_LEAK_RATE > 0u
+	fake_time_value = 4000;
+	int prepare_ctx = 1;
+
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_set_prepare_handler(prepare_handler, &prepare_ctx));
+
+	for (unsigned int i = 0u; i < (unsigned int)PULSE_RATELIM_CAPACITY; ++i) {
+		mock().expectOneCall("pulse_transport_transmit")
+			.ignoreOtherParameters()
+			.andReturnValue(0);
+		pulse_report();
+	}
+
+	prepare_handler_calls = 0u;
+	transmitted_payload_len = 0u;
+	CHECK_EQUAL(PULSE_STATUS_THROTTLED, pulse_report());
+	CHECK_EQUAL(0u, prepare_handler_calls);
+	CHECK_EQUAL(0u, transmitted_payload_len);
+#else
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+#endif
 }
 
 TEST(PulseReport, ShouldRejectOversizedMetricfsStubWriteWithoutCountingEntry)
@@ -782,6 +909,25 @@ TEST(PulseReport, ShouldReturnInProgressWhenAsyncTransportReturnedEinprogress)
 
 	metrics_set(PulseMetric, METRICS_VALUE(5));
 	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+}
+
+TEST(PulseReport, ShouldNotThrottleAsyncInFlightProgress)
+{
+	init_pulse_async();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+	CHECK_TRUE(transmitted_payload_len > 0u);
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+	CHECK_TRUE(transmitted_payload_len > 0u);
 }
 
 TEST(PulseReport, ShouldSetInFlightFlagWhenAsyncTransmitReturnsEinprogress)

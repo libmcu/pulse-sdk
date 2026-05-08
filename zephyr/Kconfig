@@ -38,8 +38,8 @@ config PULSE_LIBMCU
 	bool "Enable additional libmcu modules"
 	depends on PULSE
 	help
-	  Build and expose additional libmcu modules (retry, ratelim, etc.)
-	  beyond the metrics modules that Pulse requires internally.
+	  Build and expose additional libmcu modules (retry, runner, etc.)
+	  beyond the metrics and ratelim modules that Pulse requires internally.
 
 config PULSE_CBOR
 	bool "Enable cbor API access"

@@ -24,13 +24,28 @@
 #if !defined(PULSE_STATIC_PAYLOAD_BUFSIZE)
 #define PULSE_STATIC_PAYLOAD_BUFSIZE	0u
 #endif
-
 #if !defined(PULSE_PAYLOAD_MARGIN)
 #define PULSE_PAYLOAD_MARGIN		8u
 #endif
 
 #if !defined(METRICS_REPORT_INTERVAL_SEC)
 #define METRICS_REPORT_INTERVAL_SEC	3600U
+#endif
+
+#if !defined(PULSE_RATELIM_CAPACITY)
+#define PULSE_RATELIM_CAPACITY		10u
+#endif
+#if !defined(PULSE_RATELIM_LEAK_RATE)
+#define PULSE_RATELIM_LEAK_RATE		10u
+#endif
+#if !defined(PULSE_RATELIM_UNIT)
+#define PULSE_RATELIM_UNIT		RATELIM_UNIT_MINUTE
+#endif
+#define PULSE_RATELIM_ENABLED		\
+	((PULSE_RATELIM_CAPACITY > 0u) && (PULSE_RATELIM_LEAK_RATE > 0u))
+
+#if PULSE_RATELIM_ENABLED
+#include "libmcu/ratelim.h"
 #endif
 
 #if !defined(PULSE_WARN)
@@ -44,6 +59,9 @@
 #endif
 
 static struct pulse_report_ctx m;
+#if PULSE_RATELIM_ENABLED
+static struct ratelim report_ratelim;
+#endif
 
 #if PULSE_STATIC_PAYLOAD_BUFSIZE > 0u
 static uint8_t payload_storage[PULSE_STATIC_PAYLOAD_BUFSIZE];
@@ -387,22 +405,6 @@ static pulse_status_t map_metrics_report_error(int err)
 	}
 }
 
-static pulse_status_t collect_live_payload_to_buffer(uint8_t reason,
-		bool with_user_callback, uint64_t now,
-		uint8_t *buf, size_t bufsize,
-		size_t *encoded_len, uint64_t *window_end);
-
-/* NOTE: Any metric changes that occur after metrics_collect() and before
- * metrics_reset() are silently lost regardless of the transmission outcome.
- * This is an inherent limitation of the current single-buffer design.
- * Alternatives: (1) double-buffer at the metrics layer, or (2) drop
- * snapshot_reason from the envelope and store the original flight buffer
- * as-is on abort, eliminating the need for re-collection entirely.
- *
- * with_user_callback: Pass true on the normal report path to invoke the
- * user-registered prepare handler before collecting. Pass false when
- * re-collecting after a failed transmit (e.g. abort_flight) to avoid
- * invoking the handler a second time. */
 static pulse_status_t collect_live_payload(uint8_t reason,
 		bool with_user_callback, uint64_t now)
 {
@@ -867,6 +869,12 @@ pulse_status_t pulse_report(void)
 		}
 	}
 
+#if PULSE_RATELIM_ENABLED
+	if (!ratelim_request(&report_ratelim)) {
+		return PULSE_STATUS_THROTTLED;
+	}
+#endif
+
 	pulse_status_t status = do_collect(now);
 	if (status != PULSE_STATUS_OK) {
 		return status;
@@ -917,6 +925,8 @@ const char *pulse_stringify_status(pulse_status_t status)
 		return "no memory";
 	case PULSE_STATUS_IN_PROGRESS:
 		return "in progress";
+	case PULSE_STATUS_THROTTLED:
+		return "throttled";
 	default:
 		return "unknown";
 	}
@@ -950,6 +960,11 @@ pulse_status_t pulse_init(struct pulse *pulse)
 	set_last_report_time(0u);
 
 	metrics_init(force_reset);
+
+#if PULSE_RATELIM_ENABLED
+	ratelim_init(&report_ratelim, PULSE_RATELIM_UNIT,
+			PULSE_RATELIM_CAPACITY, PULSE_RATELIM_LEAK_RATE);
+#endif
 	m.initialized = true;
 
 	return PULSE_STATUS_OK;

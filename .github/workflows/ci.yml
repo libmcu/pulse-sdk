@@ -148,6 +148,7 @@ jobs:
           make -C examples/baremetal \
             CC=arm-none-eabi-gcc \
             CFLAGS="-mcpu=cortex-m4 -mthumb" \
+            LIBMCU_RATELIM_PORT=stubs \
             LDFLAGS="-lnosys"
 
   build-esp-idf:
