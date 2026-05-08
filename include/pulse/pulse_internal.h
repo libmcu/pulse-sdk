@@ -40,7 +40,7 @@ struct pulse_report_ctx {
 	uint64_t flight_window_end;
 	uint8_t flight_reason;
 	bool flight_from_backlog;
-	bool live_saved_during_flight;
+	bool live_presave_during_flight;
 	bool in_flight;
 
 	bool initialized;

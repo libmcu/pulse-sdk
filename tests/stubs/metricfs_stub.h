@@ -14,6 +14,8 @@ void metricfs_stub_set_peek_first_error(int err);
 void metricfs_stub_set_write_error(int err);
 const void *metricfs_stub_data(void);
 size_t metricfs_stub_size(void);
+const void *metricfs_stub_data_at(uint16_t index);
+size_t metricfs_stub_size_at(uint16_t index);
 
 #if defined(__cplusplus)
 }

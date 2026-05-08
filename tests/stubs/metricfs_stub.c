@@ -76,6 +76,24 @@ size_t metricfs_stub_size(void)
 	return stored_size[0];
 }
 
+const void *metricfs_stub_data_at(uint16_t index)
+{
+	if (index >= stored_entry_count()) {
+		return NULL;
+	}
+
+	return stored_data[index];
+}
+
+size_t metricfs_stub_size_at(uint16_t index)
+{
+	if (index >= stored_entry_count()) {
+		return 0u;
+	}
+
+	return stored_size[index];
+}
+
 struct metricfs *metricfs_create(struct kvstore *kvstore,
 		const char *prefix, const size_t max_metrics)
 {

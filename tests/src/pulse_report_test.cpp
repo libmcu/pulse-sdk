@@ -236,6 +236,7 @@ static void assert_envelope_payload_with_window(const uint8_t *payload, size_t p
 		+ (has_reason ? 1u : 0u);
 	size_t metrics_len = 0u;
 	const uint8_t *metrics_payload;
+	uint64_t report_entries = 0u;
 
 	UNSIGNED_LONGS_EQUAL(has_metrics ? 4u : 3u, cbor_read_map_size(&cursor));
 	UNSIGNED_LONGS_EQUAL(0u, cbor_read_uint(&cursor));
@@ -247,7 +248,8 @@ static void assert_envelope_payload_with_window(const uint8_t *payload, size_t p
 	UNSIGNED_LONGS_EQUAL(1u, cbor_read_uint(&cursor));
 	cbor_read_text_equals(&cursor, TEST_VERSION);
 	UNSIGNED_LONGS_EQUAL(2u, cbor_read_uint(&cursor));
-	UNSIGNED_LONGS_EQUAL(expected_report_entries, cbor_read_map_size(&cursor));
+	report_entries = cbor_read_map_size(&cursor);
+	UNSIGNED_LONGS_EQUAL(expected_report_entries, report_entries);
 
 	if (expected_timestamp != 0u) {
 		UNSIGNED_LONGS_EQUAL(0u, cbor_read_uint(&cursor));
@@ -272,7 +274,8 @@ static void assert_envelope_payload_with_window(const uint8_t *payload, size_t p
 	if (has_metrics) {
 		UNSIGNED_LONGS_EQUAL(3u, cbor_read_uint(&cursor));
 		metrics_payload = cbor_read_bstr(&cursor, &metrics_len);
-		assert_metric_payload_matches(metrics_payload, metrics_len, expected_metric_value);
+		assert_metric_payload_matches(metrics_payload, metrics_len,
+			expected_metric_value);
 	}
 
 	UNSIGNED_LONGS_EQUAL(payload_len, cursor.pos);
@@ -1806,6 +1809,130 @@ TEST(PulseReport, ShouldSaveElapsedLiveMetricsToBacklogBeforeCompletingInFlightR
 		.andReturnValue(0);
 	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_report());
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+}
+
+TEST(PulseReport, ShouldPresaveMultipleIntervalsDuringSingleInFlightReport)
+{
+	int prepare_ctx = 2;
+
+	fake_timestamp = 1000u;
+	init_pulse_async_with_mfs();
+	CHECK_EQUAL(PULSE_STATUS_OK,
+			pulse_set_prepare_handler(prepare_handler, &prepare_ctx));
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	uint8_t in_flight_payload[1024];
+	size_t in_flight_len = transmitted_payload_len;
+	CHECK_TRUE(in_flight_len <= sizeof(in_flight_payload));
+	memcpy(in_flight_payload, transmitted_payload, in_flight_len);
+
+	prepare_handler_calls = 0u;
+	prepare_order = 0u;
+	prepare_handler_order = 0u;
+	last_prepare_handler_ctx = NULL;
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	LONGS_EQUAL(in_flight_len, transmitted_payload_len);
+	MEMCMP_EQUAL(in_flight_payload, transmitted_payload, in_flight_len);
+	CHECK_EQUAL(1u, prepare_handler_calls);
+	POINTERS_EQUAL(&prepare_ctx, last_prepare_handler_ctx);
+	CHECK_EQUAL(1u, prepare_handler_order);
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	assert_envelope_payload_with_window(
+			(const uint8_t *)metricfs_stub_data_at(0u),
+			metricfs_stub_size_at(0u),
+			1000u + 3600u + 3600u, 1000u + 3600u,
+			1000u + 3600u + 3600u, true, 3, false, 0u);
+
+	prepare_handler_calls = 0u;
+	prepare_order = 0u;
+	prepare_handler_order = 0u;
+	last_prepare_handler_ctx = NULL;
+
+	fake_timestamp = 1000u + 3600u + 3600u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(4));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	LONGS_EQUAL(in_flight_len, transmitted_payload_len);
+	MEMCMP_EQUAL(in_flight_payload, transmitted_payload, in_flight_len);
+	CHECK_EQUAL(1u, prepare_handler_calls);
+	POINTERS_EQUAL(&prepare_ctx, last_prepare_handler_ctx);
+	CHECK_EQUAL(1u, prepare_handler_order);
+	CHECK_EQUAL(2u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	assert_envelope_payload_with_window(
+			(const uint8_t *)metricfs_stub_data_at(1u),
+			metricfs_stub_size_at(1u),
+			1000u + 3600u + 3600u + 3600u,
+			1000u + 3600u + 3600u,
+			1000u + 3600u + 3600u + 3600u, true, 4, false, 0u);
+}
+
+TEST(PulseReport, ShouldKeepLiveMetricsWhenInFlightPresaveWriteFails)
+{
+	fake_timestamp = 1000u;
+	init_pulse_async_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	uint8_t in_flight_payload[1024];
+	size_t in_flight_len = transmitted_payload_len;
+	CHECK_TRUE(in_flight_len <= sizeof(in_flight_payload));
+	memcpy(in_flight_payload, transmitted_payload, in_flight_len);
+
+	fake_timestamp = 1000u + 3600u + 3600u;
+	metricfs_stub_set_write_error(-ENOBUFS);
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	metrics_set(PulseMetric, METRICS_VALUE(3));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+	CHECK_EQUAL(0u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+
+	metricfs_stub_set_write_error(0);
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+
+	LONGS_EQUAL(in_flight_len, transmitted_payload_len);
+	MEMCMP_EQUAL(in_flight_payload, transmitted_payload, in_flight_len);
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	assert_envelope_payload_with_window((const uint8_t *)metricfs_stub_data(),
+			metricfs_stub_size(), 1000u + 3600u + 3600u,
+			1000u + 3600u, 1000u + 3600u + 3600u, true, 3,
+			false, 0u);
 }
 
 TEST(PulseReport, ShouldNotSaveOneSecondTailWindowDuringInFlightReport)
