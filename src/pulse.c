@@ -102,6 +102,13 @@ static bool has_backlog(void)
 	return m.conf.mfs != NULL && metricfs_count(m.conf.mfs) > 0u;
 }
 
+struct pulse_timing_state {
+	uint64_t flight_window_start;
+	uint64_t flight_window_end;
+	uint64_t last_report_time;
+	bool periodic_initialized;
+};
+
 static void set_in_flight(bool in_flight)
 {
 	m.in_flight = in_flight;
@@ -136,6 +143,22 @@ static void set_last_report_time(uint64_t timestamp)
 static uint64_t get_last_report_time(void)
 {
 	return m.last_report_time;
+}
+
+static void save_timing_state(struct pulse_timing_state *state)
+{
+	state->flight_window_start = m.flight_window_start;
+	state->flight_window_end = m.flight_window_end;
+	state->last_report_time = get_last_report_time();
+	state->periodic_initialized = m.periodic_initialized;
+}
+
+static void restore_timing_state(const struct pulse_timing_state *state)
+{
+	m.flight_window_start = state->flight_window_start;
+	m.flight_window_end = state->flight_window_end;
+	set_last_report_time(state->last_report_time);
+	m.periodic_initialized = state->periodic_initialized;
 }
 
 static void update_last_report_time_for_window(uint64_t window_end)
@@ -186,10 +209,20 @@ static bool is_live_presave_interval_reached(const uint64_t now)
 	return is_interval_reached(now);
 }
 
-static void get_live_window_bounds(uint64_t *window_start,
-		uint64_t *window_end)
+static uint64_t get_live_window_start(uint64_t now,
+		uint64_t last_report_time)
 {
-	const uint64_t now = metrics_get_unix_timestamp();
+	if (now == 0u) {
+		return 0u;
+	}
+
+	return (m.periodic_initialized && last_report_time < now)
+		? last_report_time : 0u;
+}
+
+static void get_live_window_bounds(uint64_t now,
+		uint64_t *window_start, uint64_t *window_end)
+{
 	uint64_t last_report_time = get_last_report_time();
 
 	if (is_in_flight() && !m.flight_from_backlog
@@ -198,16 +231,7 @@ static void get_live_window_bounds(uint64_t *window_start,
 	}
 
 	*window_end = now;
-	if (now == 0u) {
-		*window_start = 0u;
-		return;
-	}
-
-	if (m.periodic_initialized && last_report_time < now) {
-		*window_start = last_report_time;
-	} else {
-		*window_start = 0u;
-	}
+	*window_start = get_live_window_start(now, last_report_time);
 }
 
 static void invoke_prepare_chain(void)
@@ -217,24 +241,13 @@ static void invoke_prepare_chain(void)
 	}
 }
 
-static void set_live_window_bounds(void)
+static void set_live_window_bounds(uint64_t now)
 {
-	const uint64_t now = metrics_get_unix_timestamp();
 	const uint64_t last_report_time = get_last_report_time();
 
 	m.flight_window_end = now;
-	if (now == 0u) {
-		m.flight_window_start = 0u;
-		goto out;
-	}
+	m.flight_window_start = get_live_window_start(now, last_report_time);
 
-	if (m.periodic_initialized && last_report_time < now) {
-		m.flight_window_start = last_report_time;
-	} else {
-		m.flight_window_start = 0u;
-	}
-
-out:
 	PULSE_INFO("live window bounds: now=%llu last=%llu initialized=%u start=%llu end=%llu",
 			(unsigned long long)now,
 			(unsigned long long)last_report_time,
@@ -247,6 +260,18 @@ out:
 				(unsigned long long)m.flight_window_start,
 				(unsigned long long)m.flight_window_end);
 	}
+}
+
+static void set_envelope_ctx(struct pulse_envelope_ctx *ctx,
+		uint64_t timestamp, uint64_t window_start, uint64_t window_end,
+		uint8_t reason)
+{
+	ctx->serial_number = m.conf.serial_number;
+	ctx->software_version = m.conf.software_version;
+	ctx->timestamp = timestamp;
+	ctx->window_start = window_start;
+	ctx->window_end = window_end;
+	ctx->snapshot_reason = reason;
 }
 
 static size_t get_max_metric_entry_size(void)
@@ -290,12 +315,7 @@ static pulse_status_t derive_payload_bufsize(size_t current_payload_len,
 		return PULSE_STATUS_OVERFLOW;
 	}
 
-	ctx.serial_number = m.conf.serial_number;
-	ctx.software_version = m.conf.software_version;
-	ctx.timestamp = UINT64_MAX;
-	ctx.window_start = UINT64_MAX;
-	ctx.window_end = UINT64_MAX;
-	ctx.snapshot_reason = UINT8_MAX;
+	set_envelope_ctx(&ctx, UINT64_MAX, UINT64_MAX, UINT64_MAX, UINT8_MAX);
 
 	*bufsize = max_metrics_payload_len + pulse_codec_max_envelope_overhead(
 			&ctx, max_metrics_payload_len);
@@ -363,7 +383,8 @@ static pulse_status_t map_metrics_report_error(int err)
 }
 
 static pulse_status_t collect_live_payload_to_buffer(uint8_t reason,
-		bool with_user_callback, uint8_t *buf, size_t bufsize,
+		bool with_user_callback, uint64_t now,
+		uint8_t *buf, size_t bufsize,
 		size_t *encoded_len, uint64_t *window_end);
 
 /* NOTE: Any metric changes that occur after metrics_collect() and before
@@ -378,7 +399,7 @@ static pulse_status_t collect_live_payload_to_buffer(uint8_t reason,
  * re-collecting after a failed transmit (e.g. abort_flight) to avoid
  * invoking the handler a second time. */
 static pulse_status_t collect_live_payload(uint8_t reason,
-		bool with_user_callback)
+		bool with_user_callback, uint64_t now)
 {
 	struct pulse_envelope_ctx ctx;
 	size_t metrics_len;
@@ -388,14 +409,10 @@ static pulse_status_t collect_live_payload(uint8_t reason,
 	if (with_user_callback) {
 		invoke_prepare_chain();
 	}
-	set_live_window_bounds();
+	set_live_window_bounds(now);
 
-	ctx.serial_number = m.conf.serial_number;
-	ctx.software_version = m.conf.software_version;
-	ctx.timestamp = m.flight_window_end;
-	ctx.window_start = m.flight_window_start;
-	ctx.window_end = m.flight_window_end;
-	ctx.snapshot_reason = m.flight_reason;
+	set_envelope_ctx(&ctx, m.flight_window_end, m.flight_window_start,
+			m.flight_window_end, m.flight_reason);
 
 	metrics_len = metrics_collect(m.flight_buf, m.flight_bufsize, &writer);
 	if (metrics_len > m.flight_bufsize) {
@@ -412,7 +429,8 @@ static bool save_current_flight_to_backlog(void)
 			m.flight_buf, m.flight_len, NULL) == 0;
 }
 
-static pulse_status_t save_aborted_flight_to_backlog(int txn_err, bool *saved)
+static pulse_status_t save_aborted_flight_to_backlog(int txn_err,
+		bool *saved, uint64_t now)
 {
 	if (m.live_presave_during_flight) {
 		/* Preserve the original in-flight payload as-is. This keeps
@@ -429,7 +447,7 @@ static pulse_status_t save_aborted_flight_to_backlog(int txn_err, bool *saved)
 	pulse_status_t status = collect_live_payload((txn_err == -ECANCELED)
 			? PULSE_SNAPSHOT_REASON_BACKLOG_CANCEL
 			: PULSE_SNAPSHOT_REASON_BACKLOG_FAILURE,
-		false);
+		false, now);
 	if (status != PULSE_STATUS_OK) {
 		return status;
 	}
@@ -442,13 +460,13 @@ static pulse_status_t save_aborted_flight_to_backlog(int txn_err, bool *saved)
 	return PULSE_STATUS_OK;
 }
 
-static pulse_status_t abort_flight(int txn_err)
+static pulse_status_t abort_flight(int txn_err, uint64_t now)
 {
 	bool saved = false;
 
 	if (!m.flight_from_backlog && m.conf.mfs != NULL) {
 		const pulse_status_t status =
-			save_aborted_flight_to_backlog(txn_err, &saved);
+			save_aborted_flight_to_backlog(txn_err, &saved, now);
 		if (status != PULSE_STATUS_OK) {
 			clear_in_flight();
 			return status;
@@ -464,7 +482,7 @@ static pulse_status_t abort_flight(int txn_err)
 	return map_metrics_report_error(txn_err);
 }
 
-static pulse_status_t commit_flight(void)
+static pulse_status_t commit_flight(uint64_t live_timestamp)
 {
 	const bool was_from_backlog = m.flight_from_backlog;
 	const bool live_presave_during_flight = m.live_presave_during_flight;
@@ -473,7 +491,7 @@ static pulse_status_t commit_flight(void)
 	if (m.flight_from_backlog) {
 		err = metricfs_del_first(m.conf.mfs, NULL);
 	} else if (!live_presave_during_flight) {
-		finalize_live_metrics_snapshot(metrics_get_unix_timestamp());
+		finalize_live_metrics_snapshot(live_timestamp);
 	}
 
 	clear_in_flight();
@@ -510,10 +528,10 @@ static pulse_status_t collect_from_backlog(void)
 	return PULSE_STATUS_OK;
 }
 
-static pulse_status_t collect_from_live_metrics(void)
+static pulse_status_t collect_from_live_metrics(uint64_t now)
 {
 	pulse_status_t status =
-		collect_live_payload(PULSE_SNAPSHOT_REASON_LIVE, true);
+		collect_live_payload(PULSE_SNAPSHOT_REASON_LIVE, true, now);
 	if (status != PULSE_STATUS_OK) {
 		return status;
 	}
@@ -525,7 +543,8 @@ static pulse_status_t collect_from_live_metrics(void)
 }
 
 static pulse_status_t collect_live_payload_to_buffer(uint8_t reason,
-		bool with_user_callback, uint8_t *buf, size_t bufsize,
+		bool with_user_callback, uint64_t now,
+		uint8_t *buf, size_t bufsize,
 		size_t *encoded_len, uint64_t *window_end)
 {
 	struct pulse_envelope_ctx ctx;
@@ -539,7 +558,7 @@ static pulse_status_t collect_live_payload_to_buffer(uint8_t reason,
 	if (with_user_callback) {
 		invoke_prepare_chain();
 	}
-	get_live_window_bounds(&window_start, &local_window_end);
+	get_live_window_bounds(now, &window_start, &local_window_end);
 
 	metrics_len = metrics_collect(buf, bufsize, &writer);
 	if (metrics_len > bufsize) {
@@ -548,14 +567,11 @@ static pulse_status_t collect_live_payload_to_buffer(uint8_t reason,
 		return PULSE_STATUS_OVERFLOW;
 	}
 
-	ctx.serial_number = m.conf.serial_number;
-	ctx.software_version = m.conf.software_version;
-	ctx.timestamp = local_window_end;
-	ctx.window_start = window_start;
-	ctx.window_end = local_window_end;
-	ctx.snapshot_reason = reason;
+	set_envelope_ctx(&ctx, local_window_end, window_start, local_window_end,
+			reason);
 
-	const pulse_status_t status = pulse_codec_wrap_metrics_payload(buf, bufsize,
+	const pulse_status_t status =
+		pulse_codec_wrap_metrics_payload(buf, bufsize,
 			metrics_len, &ctx, encoded_len);
 	if (status != PULSE_STATUS_OK) {
 		m.flight_window_start = saved_window_start;
@@ -567,10 +583,10 @@ static pulse_status_t collect_live_payload_to_buffer(uint8_t reason,
 	return status;
 }
 
-static pulse_status_t write_live_metrics_to_backlog(void)
+static pulse_status_t write_live_metrics_to_backlog(uint64_t now)
 {
 	pulse_status_t status =
-		collect_live_payload(PULSE_SNAPSHOT_REASON_LIVE, true);
+		collect_live_payload(PULSE_SNAPSHOT_REASON_LIVE, true, now);
 	if (status != PULSE_STATUS_OK) {
 		return status;
 	}
@@ -585,87 +601,110 @@ static pulse_status_t write_live_metrics_to_backlog(void)
 	return PULSE_STATUS_OK;
 }
 
-static pulse_status_t presave_live_metrics_in_flight(void)
+static pulse_status_t allocate_presave_buffer(uint8_t **buf,
+		size_t *bufsize)
 {
-	uint8_t *presave_buf = NULL;
 	const size_t payload_len = metrics_collect(NULL, 0u, NULL);
-	size_t payload_bufsize = 0u;
-	size_t encoded_len = 0u;
-	uint64_t presave_window_end = 0u;
-	const bool should_presave = is_live_presave_interval_reached(
-			metrics_get_unix_timestamp());
+	pulse_status_t status = derive_payload_bufsize(payload_len, bufsize);
 
-	if (!should_presave) {
-		return PULSE_STATUS_OK;
-	}
-
-	const pulse_status_t size_status = derive_payload_bufsize(payload_len,
-			&payload_bufsize);
-	if (size_status != PULSE_STATUS_OK) {
-		return size_status;
-	}
-
-	presave_buf = (uint8_t *)malloc(payload_bufsize);
-	if (presave_buf == NULL) {
-		return PULSE_STATUS_NO_MEMORY;
-	}
-	const uint64_t saved_window_start = m.flight_window_start;
-	const uint64_t saved_window_end = m.flight_window_end;
-	const uint64_t saved_last_report_time = get_last_report_time();
-	const bool saved_periodic_initialized = m.periodic_initialized;
-
-	pulse_status_t status = collect_live_payload_to_buffer(
-			PULSE_SNAPSHOT_REASON_LIVE, true,
-			presave_buf, payload_bufsize, &encoded_len, &presave_window_end);
 	if (status != PULSE_STATUS_OK) {
-		if (status == PULSE_STATUS_EMPTY) {
-			status = PULSE_STATUS_OK;
-		}
-		m.flight_window_start = saved_window_start;
-		m.flight_window_end = saved_window_end;
-		set_last_report_time(saved_last_report_time);
-		m.periodic_initialized = saved_periodic_initialized;
-		free(presave_buf);
 		return status;
 	}
 
-	int err = metricfs_write(m.conf.mfs, presave_buf, encoded_len, NULL);
-	if (err != 0) {
-		m.flight_window_start = saved_window_start;
-		m.flight_window_end = saved_window_end;
-		set_last_report_time(saved_last_report_time);
-		m.periodic_initialized = saved_periodic_initialized;
-		free(presave_buf);
-		return map_metrics_report_error(err);
+	*buf = (uint8_t *)malloc(*bufsize);
+	return (*buf != NULL) ? PULSE_STATUS_OK : PULSE_STATUS_NO_MEMORY;
+}
+
+static void commit_live_presave(uint64_t window_end)
+{
+	metrics_reset();
+	update_last_report_time_for_window(window_end);
+	m.live_presave_during_flight = true;
+}
+
+static pulse_status_t presave_live_metrics_in_flight(uint64_t now)
+{
+	struct pulse_timing_state saved_state;
+	uint8_t *presave_buf = NULL;
+	size_t payload_bufsize = 0u;
+	size_t encoded_len = 0u;
+	uint64_t presave_window_end = 0u;
+	pulse_status_t status;
+
+	if (!is_live_presave_interval_reached(now)) {
+		return PULSE_STATUS_OK;
 	}
 
-	metrics_reset();
-	update_last_report_time_for_window(presave_window_end);
-	m.live_presave_during_flight = true;
+	status = allocate_presave_buffer(&presave_buf, &payload_bufsize);
+	if (status != PULSE_STATUS_OK) {
+		return status;
+	}
 
+	save_timing_state(&saved_state);
+	status = collect_live_payload_to_buffer(PULSE_SNAPSHOT_REASON_LIVE,
+			true, now, presave_buf, payload_bufsize, &encoded_len,
+			&presave_window_end);
+	if (status == PULSE_STATUS_EMPTY) {
+		status = PULSE_STATUS_OK;
+		goto restore;
+	}
+	if (status != PULSE_STATUS_OK) {
+		goto restore;
+	}
+
+	const int err =
+		metricfs_write(m.conf.mfs, presave_buf, encoded_len, NULL);
+	if (err != 0) {
+		status = map_metrics_report_error(err);
+		goto restore;
+	}
+
+	commit_live_presave(presave_window_end);
+	goto out;
+
+restore:
+	restore_timing_state(&saved_state);
+out:
 	free(presave_buf);
 
-	return PULSE_STATUS_OK;
+	return status;
 }
 
-static pulse_status_t save_live_metrics_to_backlog(void)
+static pulse_status_t save_live_metrics_to_backlog(uint64_t now)
 {
 	if (!is_in_flight()) {
-		return write_live_metrics_to_backlog();
+		return write_live_metrics_to_backlog(now);
 	}
 
-	return presave_live_metrics_in_flight();
+	return presave_live_metrics_in_flight(now);
 }
 
-static pulse_status_t do_collect(void)
+static void presave_live_metrics_before_backlog(uint64_t now)
 {
-	pulse_status_t status;
-	size_t payload_len;
+	if (now != 0u && m.periodic_initialized
+			&& is_live_presave_interval_reached(now)) {
+		(void)save_live_metrics_to_backlog(now);
+	}
+}
+
+static pulse_status_t collect_next_payload(bool backlog_pending, uint64_t now)
+{
+	if (!backlog_pending) {
+		return collect_from_live_metrics(now);
+	}
+
+	presave_live_metrics_before_backlog(now);
+
+	return collect_from_backlog();
+}
+
+static pulse_status_t do_collect(uint64_t now)
+{
+	const size_t payload_len = metrics_collect(NULL, 0u, NULL);
 	size_t payload_bufsize;
+	pulse_status_t status = derive_payload_bufsize(payload_len,
+			&payload_bufsize);
 
-	payload_len = metrics_collect(NULL, 0u, NULL);
-
-	status = derive_payload_bufsize(payload_len, &payload_bufsize);
 	if (status != PULSE_STATUS_OK) {
 		return status;
 	}
@@ -676,19 +715,8 @@ static pulse_status_t do_collect(void)
 		return status;
 	}
 
-	if (has_backlog()) {
-		const uint64_t now = metrics_get_unix_timestamp();
-
-		if (now != 0u && m.periodic_initialized
-				&& is_live_presave_interval_reached(now)) {
-			(void)save_live_metrics_to_backlog();
-		}
-
-		status = collect_from_backlog();
-	} else {
-		status = collect_from_live_metrics();
-	}
-
+	const bool backlog_pending = has_backlog();
+	status = collect_next_payload(backlog_pending, now);
 	if (status != PULSE_STATUS_OK) {
 		free_flight_buf();
 	}
@@ -696,19 +724,19 @@ static pulse_status_t do_collect(void)
 	return status;
 }
 
-static pulse_status_t do_transmit(void)
+static pulse_status_t do_transmit(uint64_t now)
 {
 	int err = pulse_transport_transmit(m.flight_buf, m.flight_len, &m);
 
 	if (err == 0) {
-		return commit_flight();
+		return commit_flight(now);
 	}
 
 	if (err == -EINPROGRESS) {
 		return PULSE_STATUS_IN_PROGRESS;
 	}
 
-	return abort_flight(err);
+	return abort_flight(err, now);
 }
 
 pulse_status_t pulse_update_token(const char *token)
@@ -750,22 +778,44 @@ pulse_status_t pulse_set_prepare_handler(pulse_prepare_handler_t handler,
 uint32_t pulse_get_sec_until_next_report(void)
 {
 	const uint64_t now = metrics_get_unix_timestamp();
+	const uint64_t last_report_time = get_last_report_time();
 
 	if (!is_initialized() || is_in_flight() || has_backlog() || now == 0u
 			|| !m.periodic_initialized) {
 		return 0u;
 	}
 
-	if (now < get_last_report_time()) {
+	if (now < last_report_time) {
 		return 0u;
 	}
 
-	const uint64_t elapsed_sec = now - get_last_report_time();
+	const uint64_t elapsed_sec = now - last_report_time;
 	if (elapsed_sec >= METRICS_REPORT_INTERVAL_SEC) {
 		return 0u;
 	}
 
 	return METRICS_REPORT_INTERVAL_SEC - elapsed_sec;
+}
+
+static pulse_status_t report_in_flight(uint64_t now)
+{
+	if (now && m.conf.mfs != NULL && m.periodic_initialized
+			&& is_live_presave_interval_reached(now)) {
+		(void)save_live_metrics_to_backlog(now);
+	}
+
+	return do_transmit(now);
+}
+
+static pulse_status_t check_live_report_interval(uint64_t now)
+{
+	if (now != 0u && now < get_last_report_time()) {
+		set_last_report_time(now);
+		return PULSE_STATUS_TOO_SOON;
+	}
+
+	return is_interval_reached(now)
+		? PULSE_STATUS_OK : PULSE_STATUS_TOO_SOON;
 }
 
 pulse_status_t pulse_report(void)
@@ -774,35 +824,25 @@ pulse_status_t pulse_report(void)
 		return PULSE_STATUS_INVALID_ARGUMENT;
 	}
 
-	if (is_in_flight()) {
-		const uint64_t now = metrics_get_unix_timestamp();
-		if (now && m.conf.mfs != NULL && m.periodic_initialized
-				&& is_live_presave_interval_reached(now)) {
-			(void)save_live_metrics_to_backlog();
-		}
+	const uint64_t now = metrics_get_unix_timestamp();
 
-		return do_transmit();
+	if (is_in_flight()) {
+		return report_in_flight(now);
 	}
 
 	if (!has_backlog()) {
-		const uint64_t now = metrics_get_unix_timestamp();
-
-		if (now != 0u && now < get_last_report_time()) {
-			set_last_report_time(now);
-			return PULSE_STATUS_TOO_SOON;
-		}
-
-		if (!is_interval_reached(now)) {
-			return PULSE_STATUS_TOO_SOON;
+		pulse_status_t status = check_live_report_interval(now);
+		if (status != PULSE_STATUS_OK) {
+			return status;
 		}
 	}
 
-	const pulse_status_t collect_status = do_collect();
-	if (collect_status != PULSE_STATUS_OK) {
-		return collect_status;
+	pulse_status_t status = do_collect(now);
+	if (status != PULSE_STATUS_OK) {
+		return status;
 	}
 
-	return do_transmit();
+	return do_transmit(now);
 }
 
 LIBMCU_WEAK void pulse_transport_cancel(void) {}
@@ -815,7 +855,7 @@ pulse_status_t pulse_cancel(void)
 
 	pulse_transport_cancel();
 
-	return abort_flight(-ECANCELED);
+	return abort_flight(-ECANCELED, metrics_get_unix_timestamp());
 }
 
 const char *pulse_stringify_status(pulse_status_t status)
