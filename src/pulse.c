@@ -33,9 +33,6 @@
 #define METRICS_REPORT_INTERVAL_SEC	3600U
 #endif
 
-#if !defined(PULSE_ERROR)
-#define PULSE_ERROR(...)
-#endif
 #if !defined(PULSE_WARN)
 #define PULSE_WARN(...)
 #endif
