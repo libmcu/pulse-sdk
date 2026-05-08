@@ -386,7 +386,8 @@ function(pulse_collect out_srcs out_public_incs out_private_incs)
 			list(APPEND _public_incs
 				${LIBMCU_INTERFACES_INCS}
 				${_PULSE_LIBMCU_RESOLVED_ROOT}/modules/common/include
-				${_PULSE_LIBMCU_RESOLVED_ROOT}/modules/metrics/include)
+				${_PULSE_LIBMCU_RESOLVED_ROOT}/modules/metrics/include
+				${_PULSE_LIBMCU_RESOLVED_ROOT}/modules/ratelim/include)
 		endif()
 	endif()
 
@@ -420,6 +421,8 @@ function(pulse_collect out_srcs out_public_incs out_private_incs)
 	# the caller is responsible for providing the following libmcu implementation:
 	#   - <libmcu>/modules/metrics/src/metrics.c
 	#   - <libmcu>/modules/metrics/src/metricfs.c
+	#   - <libmcu>/modules/ratelim/src/ratelim.c
+	#   - <libmcu>/ports/<ratelim-port>/ratelim.c
 	#   - <libmcu>/modules/common/src/assert.c
 	#   - <libmcu>/modules/common/src/base64.c (coaps transport only)
 	# For archive-based platforms, the build system must retain
@@ -430,7 +433,16 @@ function(pulse_collect out_srcs out_public_incs out_private_incs)
 		list(APPEND _srcs
 			${_PULSE_LIBMCU_RESOLVED_ROOT}/modules/common/src/assert.c
 			${_PULSE_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metrics.c
-			${_PULSE_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metricfs.c)
+			${_PULSE_LIBMCU_RESOLVED_ROOT}/modules/metrics/src/metricfs.c
+			${_PULSE_LIBMCU_RESOLVED_ROOT}/modules/ratelim/src/ratelim.c)
+
+		if(EXISTS "${_PULSE_LIBMCU_RESOLVED_ROOT}/ports/${_platform}/ratelim.c")
+			list(APPEND _srcs
+				${_PULSE_LIBMCU_RESOLVED_ROOT}/ports/${_platform}/ratelim.c)
+		elseif(EXISTS "${_PULSE_LIBMCU_RESOLVED_ROOT}/ports/posix/ratelim.c")
+			list(APPEND _srcs
+				${_PULSE_LIBMCU_RESOLVED_ROOT}/ports/posix/ratelim.c)
+		endif()
 
 		if(_transport STREQUAL "coaps")
 			list(APPEND _srcs

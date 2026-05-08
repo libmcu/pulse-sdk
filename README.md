@@ -72,6 +72,13 @@ Platform-specific selection methods:
 - **Baremetal Make**: the Make integration auto-adds the HTTPS
   transport only. To use CoAPS, add the CoAPS transport source manually.
 
+### Rate limiting
+
+Pulse SDK rate-limits new report attempts with an internal build-time
+leaky-bucket. The default limit is 10 transmissions per minute.
+When throttled, `pulse_report()` returns `PULSE_STATUS_THROTTLED` and does not
+run the prepare handler, collect metrics, drain backlog, or transmit.
+
 ### Zephyr
 
 Add as a [west module](https://docs.zephyrproject.org/latest/develop/modules.html)
@@ -285,5 +292,7 @@ Your application must provide required Pulse metadata directly via `struct pulse
 >
 > - `<libmcu>/modules/metrics/src/metrics.c`
 > - `<libmcu>/modules/metrics/src/metricfs.c`
+> - `<libmcu>/modules/ratelim/src/ratelim.c`
+> - `<libmcu>/ports/<ratelim-port>/ratelim.c`
 > - `<libmcu>/modules/common/src/assert.c`
 > - `<libmcu>/modules/common/src/base64.c` (when `PULSE_TRANSPORT=coaps`)

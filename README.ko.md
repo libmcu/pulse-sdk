@@ -72,6 +72,12 @@ DTLS PSK identity는 SDK가 내부에서 계산합니다.
 - **Baremetal Make**: 번들 Make 통합은 HTTPS transport만 자동 추가합니다.
   CoAPS를 사용하려면 transport 소스를 수동으로 바꿔 넣어야 합니다.
 
+### Rate limiting
+
+Pulse SDK는 `pulse_report()` 신규 네트워크 시도에 대해 내부 빌드 타임
+leaky-bucket 레이트 리밋을 적용합니다. 기본값은 분당 10회로,
+분당 10회를 초과하면 `pulse_report()`는 `PULSE_STATUS_THROTTLED`를 반환합니다.
+
 ### Zephyr
 
 west manifest에
@@ -282,5 +288,7 @@ Make 통합 시 `pulse.mk`는 아래 순서로 의존성을 해석합니다.
 >
 > - `<libmcu>/modules/metrics/src/metrics.c`
 > - `<libmcu>/modules/metrics/src/metricfs.c`
+> - `<libmcu>/modules/ratelim/src/ratelim.c`
+> - `<libmcu>/ports/<ratelim-port>/ratelim.c`
 > - `<libmcu>/modules/common/src/assert.c`
 > - `<libmcu>/modules/common/src/base64.c` (`PULSE_TRANSPORT=coaps` 사용 시)

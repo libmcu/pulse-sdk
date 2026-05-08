@@ -52,6 +52,8 @@ typedef enum {
 	 * report interval elapsed while the transfer was in progress, live
 	 * metrics may have been saved to the backlog before retrying. */
 	PULSE_STATUS_IN_PROGRESS	= -12,
+	/* Reporting was rate-limited. Retry after the configured rate window. */
+	PULSE_STATUS_THROTTLED		= -13,
 } pulse_status_t;
 
 /**

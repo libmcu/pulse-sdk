@@ -31,6 +31,15 @@ endif
 
 LIBMCU_INTERFACES := uart kvstore
 
+LIBMCU_MODULES ?= metrics
+ifeq ($(filter metrics,$(LIBMCU_MODULES)),)
+LIBMCU_MODULES += metrics
+endif
+ifeq ($(filter ratelim,$(LIBMCU_MODULES)),)
+LIBMCU_MODULES += ratelim
+endif
+
+include $(LIBMCU_ROOT)/project/modules.mk
 include $(LIBMCU_ROOT)/project/interfaces.mk
 include $(CBOR_ROOT)/cbor.mk
 
@@ -46,14 +55,9 @@ PULSE_CBOR_SRCS := $(CBOR_SRCS)
 # always exported through PULSE_CORE_SRCS. Additional libmcu runtime
 # sources are collected automatically only when LIBMCU_ROOT resolves to the
 # bundled external/libmcu path. When an external LIBMCU_ROOT is supplied, the
-# caller must manually add the following libmcu sources to the build:
-#   $(LIBMCU_ROOT)/modules/metrics/src/metrics.c
-#   $(LIBMCU_ROOT)/modules/metrics/src/metricfs.c
-#   $(LIBMCU_ROOT)/modules/common/src/assert.c
+# caller must make sure the selected libmcu module sources are linked.
 ifeq ($(realpath $(LIBMCU_ROOT)),$(realpath $(PULSE_ROOT)/external/libmcu))
-	PULSE_CORE_SRCS += $(LIBMCU_ROOT)/modules/common/src/assert.c
-	PULSE_CORE_SRCS += $(LIBMCU_ROOT)/modules/metrics/src/metrics.c
-	PULSE_CORE_SRCS += $(LIBMCU_ROOT)/modules/metrics/src/metricfs.c
+	PULSE_CORE_SRCS += $(LIBMCU_MODULES_SRCS)
 endif
 
 PULSE_SRCS ?= $(PULSE_CORE_SRCS) $(PULSE_CBOR_SRCS)
@@ -61,6 +65,5 @@ PULSE_SRCS ?= $(PULSE_CORE_SRCS) $(PULSE_CBOR_SRCS)
 PULSE_INCS := \
 	$(PULSE_ROOT)/include \
 	$(LIBMCU_INTERFACES_INCS) \
-	$(LIBMCU_ROOT)/modules/common/include \
-	$(LIBMCU_ROOT)/modules/metrics/include \
+	$(LIBMCU_MODULES_INCS) \
 	$(CBOR_INCS)

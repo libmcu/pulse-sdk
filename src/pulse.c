@@ -24,13 +24,28 @@
 #if !defined(PULSE_STATIC_PAYLOAD_BUFSIZE)
 #define PULSE_STATIC_PAYLOAD_BUFSIZE	0u
 #endif
-
 #if !defined(PULSE_PAYLOAD_MARGIN)
 #define PULSE_PAYLOAD_MARGIN		8u
 #endif
 
 #if !defined(METRICS_REPORT_INTERVAL_SEC)
 #define METRICS_REPORT_INTERVAL_SEC	3600U
+#endif
+
+#if !defined(PULSE_RATELIM_CAPACITY)
+#define PULSE_RATELIM_CAPACITY		10u
+#endif
+#if !defined(PULSE_RATELIM_LEAK_RATE)
+#define PULSE_RATELIM_LEAK_RATE		10u
+#endif
+#if !defined(PULSE_RATELIM_UNIT)
+#define PULSE_RATELIM_UNIT		RATELIM_UNIT_MINUTE
+#endif
+#define PULSE_RATELIM_ENABLED		\
+	((PULSE_RATELIM_CAPACITY > 0u) && (PULSE_RATELIM_LEAK_RATE > 0u))
+
+#if PULSE_RATELIM_ENABLED
+#include "libmcu/ratelim.h"
 #endif
 
 #if !defined(PULSE_WARN)
@@ -44,6 +59,9 @@
 #endif
 
 static struct pulse_report_ctx m;
+#if PULSE_RATELIM_ENABLED
+static struct ratelim report_ratelim;
+#endif
 
 #if PULSE_STATIC_PAYLOAD_BUFSIZE > 0u
 static uint8_t payload_storage[PULSE_STATIC_PAYLOAD_BUFSIZE];
@@ -867,6 +885,12 @@ pulse_status_t pulse_report(void)
 		}
 	}
 
+#if PULSE_RATELIM_ENABLED
+	if (!ratelim_request(&report_ratelim)) {
+		return PULSE_STATUS_THROTTLED;
+	}
+#endif
+
 	pulse_status_t status = do_collect(now);
 	if (status != PULSE_STATUS_OK) {
 		return status;
@@ -917,6 +941,8 @@ const char *pulse_stringify_status(pulse_status_t status)
 		return "no memory";
 	case PULSE_STATUS_IN_PROGRESS:
 		return "in progress";
+	case PULSE_STATUS_THROTTLED:
+		return "throttled";
 	default:
 		return "unknown";
 	}
@@ -950,6 +976,11 @@ pulse_status_t pulse_init(struct pulse *pulse)
 	set_last_report_time(0u);
 
 	metrics_init(force_reset);
+
+#if PULSE_RATELIM_ENABLED
+	ratelim_init(&report_ratelim, PULSE_RATELIM_UNIT,
+			PULSE_RATELIM_CAPACITY, PULSE_RATELIM_LEAK_RATE);
+#endif
 	m.initialized = true;
 
 	return PULSE_STATUS_OK;

@@ -12,13 +12,21 @@ ifeq ($(CBOR_ROOT),)
 $(error CBOR_ROOT not found in ../build/_deps; run CMake configure first)
 endif
 
+PULSE_REPORT_RATELIM_DISABLED ?= 0
+
+LIBMCU_MODULES := metrics
+ifeq ($(PULSE_REPORT_RATELIM_DISABLED),0)
+LIBMCU_MODULES += ratelim
+endif
+
+include $(LIBMCU_ROOT)/project/modules.mk
 include $(CBOR_ROOT)/cbor.mk
 
 SRC_FILES = \
 	../src/pulse.c \
 	../src/pulse_codec.c \
 	$(CBOR_SRCS) \
-	$(LIBMCU_ROOT)/modules/metrics/src/metrics.c \
+	$(filter-out %/metricfs.c %/assert.c,$(LIBMCU_MODULES_SRCS)) \
 
 TEST_SRC_FILES = \
 	src/pulse_codec_test.cpp \
@@ -31,8 +39,7 @@ INCLUDE_DIRS = \
 	$(CPPUTEST_HOME)/include \
 	../include \
 	stubs \
-	$(LIBMCU_ROOT)/modules/metrics/include \
-	$(LIBMCU_ROOT)/modules/common/include \
+	$(LIBMCU_MODULES_INCS) \
 	$(LIBMCU_ROOT)/interfaces/kvstore/include \
 	$(CBOR_INCS) \
 
@@ -43,6 +50,12 @@ CPPUTEST_CPPFLAGS = \
 	-DMETRICS_USER_DEFINES=\"../examples/metrics.def\" \
 	-DLIBMCU_NOINIT= \
 	-Wno-error=unused-macros
+
+ifneq ($(PULSE_REPORT_RATELIM_DISABLED),0)
+CPPUTEST_CPPFLAGS += \
+	-DPULSE_RATELIM_CAPACITY=0u \
+	-DPULSE_RATELIM_LEAK_RATE=0u
+endif
 
 CPPUTEST_WARNINGFLAGS += -Wno-error=unused-macros
 
