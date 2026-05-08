@@ -33,6 +33,13 @@
 #define METRICS_REPORT_INTERVAL_SEC	3600U
 #endif
 
+#if !defined(PULSE_WARN)
+#define PULSE_WARN(...)
+#endif
+#if !defined(PULSE_INFO)
+#define PULSE_INFO(...)
+#endif
+
 static struct pulse_report_ctx m;
 
 #if PULSE_STATIC_PAYLOAD_BUFSIZE > 0u
@@ -181,17 +188,32 @@ static void invoke_prepare_chain(void)
 static void set_live_window_bounds(void)
 {
 	const uint64_t now = metrics_get_unix_timestamp();
+	const uint64_t last_report_time = get_last_report_time();
 
 	m.flight_window_end = now;
 	if (now == 0u) {
 		m.flight_window_start = 0u;
-		return;
+		goto out;
 	}
 
-	if (m.periodic_initialized && get_last_report_time() <= now) {
-		m.flight_window_start = get_last_report_time();
+	if (m.periodic_initialized && last_report_time < now) {
+		m.flight_window_start = last_report_time;
 	} else {
-		m.flight_window_start = now;
+		m.flight_window_start = 0u;
+	}
+
+out:
+	PULSE_INFO("live window bounds: now=%llu last=%llu initialized=%u start=%llu end=%llu",
+			(unsigned long long)now,
+			(unsigned long long)last_report_time,
+			m.periodic_initialized ? 1u : 0u,
+			(unsigned long long)m.flight_window_start,
+			(unsigned long long)m.flight_window_end);
+	if (m.flight_window_start != 0u
+			&& m.flight_window_end <= m.flight_window_start) {
+		PULSE_WARN("invalid live window bounds: start=%llu end=%llu",
+				(unsigned long long)m.flight_window_start,
+				(unsigned long long)m.flight_window_end);
 	}
 }
 
