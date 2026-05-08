@@ -420,19 +420,26 @@ TEST(PulseReport, ShouldWrapPayloadInCanonicalEnvelope)
 			1234u, 0u, 1234u, true, 100, false, 0u);
 }
 
-TEST(PulseReport, ShouldOmitWindowStartWhenFirstTimestampedReportHasNoBoundary)
+TEST(PulseReport, ShouldIncludeWindowStartForSubsequentTimestampedReport)
 {
 	fake_timestamp = 1234u;
 
 	mock().expectOneCall("pulse_transport_transmit")
 		.ignoreOtherParameters()
 		.andReturnValue(0);
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
 
+	metrics_set(PulseMetric, METRICS_VALUE(100));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 5678u;
 	metrics_set(PulseMetric, METRICS_VALUE(100));
 
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 	assert_envelope_payload_with_window(transmitted_payload, transmitted_payload_len,
-			1234u, 0u, 1234u, true, 100, false, 0u);
+			5678u, 1234u, 5678u, true, 100, false, 0u);
 }
 
 TEST(PulseReport, ShouldPreferExplicitMetadataFromConfig)
