@@ -15,6 +15,7 @@ extern "C" {
 
 #include "psa/crypto.h"
 
+#include "zephyr/kernel.h"
 #include "zephyr/net/coap.h"
 #include "zephyr/net/http/client.h"
 #include "zephyr/net/socket.h"
@@ -52,6 +53,7 @@ TEST_GROUP(PulseTransportCoapsZephyr)
 		zephyr_socket_mock_set_addrinfo_count(1u);
 		zephyr_tls_mock_reset();
 		zephyr_coap_mock_reset();
+		zephyr_uptime_mock_reset();
 		psa_crypto_mock_reset();
 		mock().ignoreOtherCalls();
 		pulse_transport_cancel();
@@ -297,6 +299,36 @@ TEST(PulseTransportCoapsZephyr, ShouldReturnInProgressWhenAsyncAndNoResponseYet)
 	CHECK_EQUAL(-EINPROGRESS,
 			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
 	CHECK_EQUAL(-EINPROGRESS,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+}
+
+TEST(PulseTransportCoapsZephyr,
+		ShouldReturnTimeoutWhenAsyncNoResponseExceedsTransmitTimeout)
+{
+	static const uint8_t payload[] = { 0x01 };
+	static const uint8_t dummy_datagram[] = { 0x40 };
+
+	g_ctx.conf.token = VALID_TOKEN;
+	g_ctx.conf.async_transport = true;
+	g_ctx.conf.transmit_timeout_ms = 1u;
+	zephyr_uptime_mock_set_ms(0);
+
+	CHECK_EQUAL(-EINPROGRESS,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+	CHECK_EQUAL(-EINPROGRESS,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+
+	zephyr_uptime_mock_set_ms(2);
+
+	CHECK_EQUAL(-ETIMEDOUT,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+
+	zephyr_socket_mock_set_recv_data(dummy_datagram, sizeof(dummy_datagram));
+	zephyr_coap_mock_set_response(COAP_RESPONSE_CODE_CHANGED, NULL, 0u);
+
+	CHECK_EQUAL(-EINPROGRESS,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+	CHECK_EQUAL(0,
 			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
 }
 

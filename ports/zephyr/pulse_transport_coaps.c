@@ -16,6 +16,7 @@
 
 #include <psa/crypto.h>
 
+#include <zephyr/kernel.h>
 #include <zephyr/net/coap.h>
 #include <zephyr/net/socket.h>
 #include <zephyr/net/tls_credentials.h>
@@ -44,6 +45,7 @@ typedef struct {
 
 typedef struct {
 	int sock;
+	int64_t start_ms;
 	coaps_state_t state;
 	bool credentials_registered;
 	const struct pulse_report_ctx *rctx;
@@ -98,9 +100,15 @@ static void cleanup_session(coaps_session_t *s)
 {
 	close_socket_if_open(s);
 	cleanup_credentials(s);
+	s->start_ms = 0;
 	s->state = STATE_IDLE;
 	s->rctx = NULL;
 	reset_response(&s->response);
+}
+
+static bool has_session_timed_out(int64_t start_ms, int32_t timeout_ms)
+{
+	return (k_uptime_get() - start_ms) >= (int64_t)timeout_ms;
 }
 
 static int compute_psk_identity(char buf[static PULSE_PSK_IDENTITY_BUFSIZE],
@@ -528,6 +536,7 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 		goto out;
 	}
 
+	s->start_ms = k_uptime_get();
 	s->state = STATE_AWAITING_RESPONSE;
 	free(request_buf);
 
@@ -598,6 +607,11 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 	}
 
 	if (!ready) {
+		if (ctx->conf.async_transport &&
+				has_session_timed_out(m_session.start_ms, timeout_ms)) {
+			return finish_session(&m_session, -ETIMEDOUT);
+		}
+
 		if (ctx->conf.async_transport) {
 			return -EINPROGRESS;
 		}

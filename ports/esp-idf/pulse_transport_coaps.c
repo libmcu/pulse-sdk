@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include <coap3/coap.h>
+#include <esp_timer.h>
 #include <mbedtls/version.h>
 
 #if MBEDTLS_VERSION_NUMBER >= 0x04000000
@@ -55,6 +56,7 @@ typedef struct {
 	coap_session_t *session;
 	exchange_t ex;
 	response_buf_t response;
+	uint64_t start_us;
 	coaps_state_t state;
 	const struct pulse_report_ctx *rctx;
 	bool coap_started;
@@ -276,6 +278,7 @@ static void cleanup_session(coaps_session_t *s)
 		coap_cleanup();
 		s->coap_started = false;
 	}
+	s->start_us = 0u;
 	s->state = STATE_IDLE;
 	s->rctx = NULL;
 }
@@ -346,6 +349,7 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 		goto fail;
 	}
 
+	s->start_us = (uint64_t)esp_timer_get_time();
 	s->state = STATE_IN_PROGRESS;
 	return 0;
 
@@ -364,6 +368,7 @@ static int advance_session(coaps_session_t *s, bool async,
 		uint32_t timeout_ms)
 {
 	uint32_t remaining = timeout_ms;
+	const uint64_t timeout_us = (uint64_t)timeout_ms * 1000u;
 	int elapsed;
 
 	do {
@@ -390,6 +395,12 @@ static int advance_session(coaps_session_t *s, bool async,
 	} while (!s->ex.done && remaining > 0u);
 
 	if (!s->ex.done) {
+		if (async && ((uint64_t)esp_timer_get_time() - s->start_us)
+				>= timeout_us) {
+			cleanup_session(s);
+			return -ETIMEDOUT;
+		}
+
 		if (async) {
 			return -EINPROGRESS;
 		}

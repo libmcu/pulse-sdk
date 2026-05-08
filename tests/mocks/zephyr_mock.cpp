@@ -9,6 +9,7 @@
 #include <string.h>
 
 extern "C" {
+#include "zephyr/kernel.h"
 #include "zephyr/net/socket.h"
 #include "zephyr/net/http/client.h"
 #include "zephyr/net/tls_credentials.h"
@@ -16,6 +17,7 @@ extern "C" {
 
 static struct sockaddr g_fake_addr[2];
 static struct zsock_addrinfo g_fake_addrinfo[2];
+static int64_t g_uptime_ms;
 
 static struct {
 	http_response_cb cb;
@@ -113,6 +115,21 @@ void zephyr_http_mock_reset(void)
 	g_fake_addrinfo[0].ai_socktype = SOCK_STREAM;
 	g_fake_addrinfo[0].ai_addrlen = (unsigned int)sizeof(g_fake_addr[0]);
 	g_fake_addrinfo[0].ai_addr = &g_fake_addr[0];
+}
+
+extern "C" void zephyr_uptime_mock_reset(void)
+{
+	g_uptime_ms = 0;
+}
+
+extern "C" void zephyr_uptime_mock_set_ms(int64_t time_ms)
+{
+	g_uptime_ms = time_ms;
+}
+
+extern "C" int64_t k_uptime_get(void)
+{
+	return g_uptime_ms;
 }
 
 void zephyr_socket_mock_set_addrinfo_count(size_t count)
