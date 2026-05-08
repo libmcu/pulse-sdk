@@ -414,7 +414,6 @@ TEST_GROUP(PulseReport)
 		metricfs_stub_reset();
 		metrics_reset();
 
-		fake_time_value = 0;
 		init_pulse_default();
 	}
 

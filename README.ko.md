@@ -74,9 +74,11 @@ DTLS PSK identity는 SDK가 내부에서 계산합니다.
 
 ### Rate limiting
 
-Pulse SDK는 `pulse_report()` 신규 네트워크 시도에 대해 내부 빌드 타임
+Pulse SDK는 `pulse_report()`의 신규 네트워크 시도에 대해 내부 빌드 타임
 leaky-bucket 레이트 리밋을 적용합니다. 기본값은 분당 10회로,
 분당 10회를 초과하면 `pulse_report()`는 `PULSE_STATUS_THROTTLED`를 반환합니다.
+Throttled된 호출에서는 prepare handler 실행, 메트릭 수집, backlog drain,
+실제 전송 시도가 모두 수행되지 않습니다.
 
 ### Zephyr
 

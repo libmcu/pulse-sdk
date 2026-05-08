@@ -405,22 +405,6 @@ static pulse_status_t map_metrics_report_error(int err)
 	}
 }
 
-static pulse_status_t collect_live_payload_to_buffer(uint8_t reason,
-		bool with_user_callback, uint64_t now,
-		uint8_t *buf, size_t bufsize,
-		size_t *encoded_len, uint64_t *window_end);
-
-/* NOTE: Any metric changes that occur after metrics_collect() and before
- * metrics_reset() are silently lost regardless of the transmission outcome.
- * This is an inherent limitation of the current single-buffer design.
- * Alternatives: (1) double-buffer at the metrics layer, or (2) drop
- * snapshot_reason from the envelope and store the original flight buffer
- * as-is on abort, eliminating the need for re-collection entirely.
- *
- * with_user_callback: Pass true on the normal report path to invoke the
- * user-registered prepare handler before collecting. Pass false when
- * re-collecting after a failed transmit (e.g. abort_flight) to avoid
- * invoking the handler a second time. */
 static pulse_status_t collect_live_payload(uint8_t reason,
 		bool with_user_callback, uint64_t now)
 {
