@@ -26,6 +26,13 @@
 
 #include "libmcu/base64.h"
 
+#if !defined(PULSE_WARN)
+#define PULSE_WARN(...)
+#endif
+#if !defined(PULSE_ERROR)
+#define PULSE_ERROR(...)
+#endif
+
 #define COAPS_TIMEOUT_MS_DEFAULT	15000u
 #define COAPS_RESPONSE_BUFSIZE		4096u
 #define PSK_IDENTITY_HEX_LEN		32u
@@ -301,23 +308,27 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 
 	ret = compute_psk_identity(psk_id, conf->token);
 	if (ret != 0) {
+		PULSE_ERROR("psk identity failed: err=%d", ret);
 		goto fail;
 	}
 
 	if (lm_base64url_decode(psk_key, sizeof(psk_key),
 			conf->token, strlen(conf->token)) != PSK_KEY_LEN) {
+		PULSE_ERROR("psk decode failed: err=%d", -EINVAL);
 		ret = -EINVAL;
 		goto fail;
 	}
 
 	s->ctx = coap_new_context(NULL);
 	if (s->ctx == NULL) {
+		PULSE_ERROR("coaps context init failed: err=%d", -ENOMEM);
 		ret = -ENOMEM;
 		goto fail;
 	}
 
 	ret = resolve_server(&addr);
 	if (ret != 0) {
+		PULSE_ERROR("coaps resolve failed: err=%d", ret);
 		goto fail;
 	}
 
@@ -328,6 +339,7 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 	addr = NULL;
 
 	if (s->session == NULL) {
+		PULSE_ERROR("coaps session init failed: err=%d", -EIO);
 		ret = -EIO;
 		goto fail;
 	}
@@ -338,6 +350,7 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 
 	ret = build_coap_pdu(&pdu, s->session, data, datasize);
 	if (ret != 0) {
+		PULSE_ERROR("coaps pdu build failed: err=%d", ret);
 		goto fail;
 	}
 
@@ -345,6 +358,7 @@ static int start_session(coaps_session_t *s, const void *data, size_t datasize,
 	pdu = NULL;
 
 	if (s->ex.mid == COAP_INVALID_MID) {
+		PULSE_ERROR("coaps send failed: err=%d", -EIO);
 		ret = -EIO;
 		goto fail;
 	}
@@ -398,6 +412,7 @@ static int advance_session(coaps_session_t *s, bool async,
 		if (async && ((uint64_t)esp_timer_get_time() - s->start_us)
 				>= timeout_us) {
 			cleanup_session(s);
+			PULSE_ERROR("coaps timeout: err=%d", -ETIMEDOUT);
 			return -ETIMEDOUT;
 		}
 
@@ -405,6 +420,7 @@ static int advance_session(coaps_session_t *s, bool async,
 			return -EINPROGRESS;
 		}
 		cleanup_session(s);
+		PULSE_ERROR("coaps timeout: err=%d", -ETIMEDOUT);
 		return -ETIMEDOUT;
 	}
 
@@ -432,14 +448,17 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 	const struct pulse *conf = ctx != NULL ? &ctx->conf : NULL;
 
 	if (data == NULL || datasize == 0u) {
+		PULSE_WARN("coaps transmit invalid args: err=%d", -EINVAL);
 		return -EINVAL;
 	}
 
 	if (datasize > (size_t)INT_MAX) {
+		PULSE_ERROR("coaps transmit overflow: err=%d", -EOVERFLOW);
 		return -EOVERFLOW;
 	}
 
 	if (conf == NULL || conf->token == NULL) {
+		PULSE_WARN("coaps transmit missing token: err=%d", -EINVAL);
 		return -EINVAL;
 	}
 

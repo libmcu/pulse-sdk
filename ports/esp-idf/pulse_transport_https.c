@@ -19,6 +19,13 @@
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
 
+#if !defined(PULSE_WARN)
+#define PULSE_WARN(...)
+#endif
+#if !defined(PULSE_ERROR)
+#define PULSE_ERROR(...)
+#endif
+
 #define PULSE_HTTPS_TIMEOUT_MS		60000
 #define PULSE_HTTPS_BUFFER_SIZE		4096
 #define PULSE_HTTPS_CONTENT_TYPE	"application/cbor"
@@ -153,6 +160,7 @@ static int check_response_status(esp_http_client_handle_t client)
 	int status_code = esp_http_client_get_status_code(client);
 
 	if (status_code < 200 || status_code >= 300) {
+		PULSE_ERROR("https status failed: status=%d", status_code);
 		return -EIO;
 	}
 
@@ -181,6 +189,7 @@ static int finalize_session(https_session_t *s,
 	int ret = check_response_status(s->client);
 
 	if (ret == 0 && s->response.truncated) {
+		PULSE_ERROR("https response truncated: err=%d", -EMSGSIZE);
 		ret = -EMSGSIZE;
 	}
 
@@ -193,6 +202,9 @@ static int finalize_session(https_session_t *s,
 
 	if (ret == 0) {
 		ret = map_esp_error(cleanup_err);
+		if (ret != 0) {
+			PULSE_ERROR("https cleanup failed: err=%d", ret);
+		}
 	}
 
 	return ret;
@@ -205,6 +217,7 @@ static int start_session(https_session_t *s, const void *data, size_t datasize,
 
 	s->client = create_client(&s->response, conf, async);
 	if (s->client == NULL) {
+		PULSE_ERROR("https client init failed: err=%d", -ENOMEM);
 		return -ENOMEM;
 	}
 
@@ -212,7 +225,9 @@ static int start_session(https_session_t *s, const void *data, size_t datasize,
 	if (err != ESP_OK) {
 		esp_http_client_cleanup(s->client);
 		reset_session(s);
-		return map_esp_error(err);
+		const int ret = map_esp_error(err);
+		PULSE_ERROR("https request config failed: err=%d", ret);
+		return ret;
 	}
 
 	s->start_us = async ? (uint64_t)esp_timer_get_time() : 0u;
@@ -247,6 +262,7 @@ static int advance_session(https_session_t *s,
 			has_session_timed_out(start_us, timeout_us)) {
 		esp_http_client_cleanup(s->client);
 		reset_session(s);
+		PULSE_ERROR("https request timed out: err=%d", -ETIMEDOUT);
 		return -ETIMEDOUT;
 	}
 
@@ -257,7 +273,9 @@ static int advance_session(https_session_t *s,
 	if (err != ESP_OK) {
 		esp_http_client_cleanup(s->client);
 		reset_session(s);
-		return map_esp_error(err);
+		const int ret = map_esp_error(err);
+		PULSE_ERROR("https perform failed: err=%d", ret);
+		return ret;
 	}
 
 	return finalize_session(s, rctx);
@@ -275,10 +293,12 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 		const struct pulse_report_ctx *ctx)
 {
 	if (data == NULL || datasize == 0u) {
+		PULSE_WARN("https transmit invalid args: err=%d", -EINVAL);
 		return -EINVAL;
 	}
 
 	if (datasize > (size_t)INT_MAX) {
+		PULSE_ERROR("https transmit overflow: err=%d", -EOVERFLOW);
 		return -EOVERFLOW;
 	}
 

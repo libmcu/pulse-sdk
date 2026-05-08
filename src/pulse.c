@@ -36,6 +36,9 @@
 #if !defined(PULSE_WARN)
 #define PULSE_WARN(...)
 #endif
+#if !defined(PULSE_ERROR)
+#define PULSE_ERROR(...)
+#endif
 #if !defined(PULSE_INFO)
 #define PULSE_INFO(...)
 #endif
@@ -425,8 +428,17 @@ static pulse_status_t collect_live_payload(uint8_t reason,
 
 static bool save_current_flight_to_backlog(void)
 {
-	return m.flight_len > 0u && metricfs_write(m.conf.mfs,
-			m.flight_buf, m.flight_len, NULL) == 0;
+	if (m.flight_len == 0u) {
+		return false;
+	}
+
+	int err = metricfs_write(m.conf.mfs, m.flight_buf, m.flight_len, NULL);
+	if (err != 0) {
+		PULSE_ERROR("current flight backlog write failed: err=%d", err);
+		return false;
+	}
+
+	return true;
 }
 
 static pulse_status_t save_aborted_flight_to_backlog(int txn_err,
@@ -468,12 +480,18 @@ static pulse_status_t abort_flight(int txn_err, uint64_t now)
 		const pulse_status_t status =
 			save_aborted_flight_to_backlog(txn_err, &saved, now);
 		if (status != PULSE_STATUS_OK) {
+			PULSE_ERROR("abort save failed: status=%d err=%d",
+					(int)status, txn_err);
 			clear_in_flight();
 			return status;
 		}
 	}
 
 	clear_in_flight();
+	if (saved || txn_err == -ECANCELED) {
+		PULSE_INFO("transmit abort: err=%d saved=%u",
+				txn_err, saved ? 1u : 0u);
+	}
 
 	if (saved && txn_err == -ECANCELED) {
 		return PULSE_STATUS_BACKLOG_PENDING;
@@ -497,6 +515,7 @@ static pulse_status_t commit_flight(uint64_t live_timestamp)
 	clear_in_flight();
 
 	if (err != 0) {
+		PULSE_ERROR("backlog delete failed: err=%d", err);
 		return map_metrics_report_error(err);
 	}
 
@@ -510,6 +529,7 @@ static pulse_status_t collect_from_backlog(void)
 			m.flight_buf, m.flight_bufsize, NULL);
 
 	if (n > (int)m.flight_bufsize) {
+		PULSE_ERROR("backlog peek overflow: len=%d", n);
 		return PULSE_STATUS_BACKLOG_OVERFLOW;
 	}
 
@@ -518,6 +538,7 @@ static pulse_status_t collect_from_backlog(void)
 	}
 
 	if (n < 0) {
+		PULSE_ERROR("backlog peek failed: err=%d", n);
 		return map_metrics_report_error(n);
 	}
 
@@ -593,6 +614,7 @@ static pulse_status_t write_live_metrics_to_backlog(uint64_t now)
 
 	int err = metricfs_write(m.conf.mfs, m.flight_buf, m.flight_len, NULL);
 	if (err != 0) {
+		PULSE_ERROR("live metrics backlog write failed: err=%d", err);
 		return map_metrics_report_error(err);
 	}
 
@@ -655,6 +677,7 @@ static pulse_status_t presave_live_metrics_in_flight(uint64_t now)
 	const int err =
 		metricfs_write(m.conf.mfs, presave_buf, encoded_len, NULL);
 	if (err != 0) {
+		PULSE_ERROR("live presave backlog write failed: err=%d", err);
 		status = map_metrics_report_error(err);
 		goto restore;
 	}
