@@ -230,7 +230,9 @@ static void assert_envelope_payload_with_window(const uint8_t *payload, size_t p
 		int32_t expected_metric_value, bool has_reason, uint8_t expected_reason)
 {
 	struct cbor_cursor cursor = { payload, payload_len, 0u };
-	const size_t expected_report_entries = (expected_timestamp != 0u ? 3u : 0u)
+	const size_t expected_report_entries = (expected_timestamp != 0u ? 1u : 0u)
+		+ (expected_window_start != 0u ? 1u : 0u)
+		+ (expected_window_end != 0u ? 1u : 0u)
 		+ (has_reason ? 1u : 0u);
 	size_t metrics_len = 0u;
 	const uint8_t *metrics_payload;
@@ -250,8 +252,14 @@ static void assert_envelope_payload_with_window(const uint8_t *payload, size_t p
 	if (expected_timestamp != 0u) {
 		UNSIGNED_LONGS_EQUAL(0u, cbor_read_uint(&cursor));
 		UNSIGNED_LONGS_EQUAL(expected_timestamp, cbor_read_uint(&cursor));
+	}
+
+	if (expected_window_start != 0u) {
 		UNSIGNED_LONGS_EQUAL(1u, cbor_read_uint(&cursor));
 		UNSIGNED_LONGS_EQUAL(expected_window_start, cbor_read_uint(&cursor));
+	}
+
+	if (expected_window_end != 0u) {
 		UNSIGNED_LONGS_EQUAL(2u, cbor_read_uint(&cursor));
 		UNSIGNED_LONGS_EQUAL(expected_window_end, cbor_read_uint(&cursor));
 	}
@@ -270,7 +278,8 @@ static void assert_envelope_payload_with_window(const uint8_t *payload, size_t p
 	UNSIGNED_LONGS_EQUAL(payload_len, cursor.pos);
 }
 
-static void assert_envelope_payload(const uint8_t *payload, size_t payload_len,
+static void assert_envelope_payload_with_same_timestamp_window(const uint8_t *payload,
+		size_t payload_len,
 		uint64_t expected_timestamp, bool has_metrics, int32_t expected_metric_value,
 		bool has_reason, uint8_t expected_reason)
 {
@@ -391,7 +400,8 @@ TEST(PulseReport, ShouldTransmitCollectedMetricsWhenReportCalled)
 	metrics_set(PulseMetric, METRICS_VALUE(100));
 
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
-	assert_envelope_payload(transmitted_payload, transmitted_payload_len,
+	assert_envelope_payload_with_same_timestamp_window(transmitted_payload,
+			transmitted_payload_len,
 			0u, true, 100, false, 0u);
 }
 
@@ -406,8 +416,23 @@ TEST(PulseReport, ShouldWrapPayloadInCanonicalEnvelope)
 	metrics_set(PulseMetric, METRICS_VALUE(100));
 
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
-	assert_envelope_payload(transmitted_payload, transmitted_payload_len,
-			1234u, true, 100, false, 0u);
+	assert_envelope_payload_with_window(transmitted_payload, transmitted_payload_len,
+			1234u, 0u, 1234u, true, 100, false, 0u);
+}
+
+TEST(PulseReport, ShouldOmitWindowStartWhenFirstTimestampedReportHasNoBoundary)
+{
+	fake_timestamp = 1234u;
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+
+	metrics_set(PulseMetric, METRICS_VALUE(100));
+
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+	assert_envelope_payload_with_window(transmitted_payload, transmitted_payload_len,
+			1234u, 0u, 1234u, true, 100, false, 0u);
 }
 
 TEST(PulseReport, ShouldPreferExplicitMetadataFromConfig)
@@ -467,7 +492,8 @@ TEST(PulseReport, ShouldTransmitHeartbeatWhenNoMetricsSet)
 		.andReturnValue(0);
 
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
-	assert_envelope_payload(transmitted_payload, transmitted_payload_len,
+	assert_envelope_payload_with_same_timestamp_window(transmitted_payload,
+			transmitted_payload_len,
 			0u, false, 0, false, 0u);
 }
 
@@ -895,7 +921,8 @@ TEST(PulseReport, ShouldSaveToBacklogWhenAsyncTransmitFailsWithMfs)
 	pulse_report();
 
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
-	assert_envelope_payload((const uint8_t *)metricfs_stub_data(), metricfs_stub_size(),
+	assert_envelope_payload_with_same_timestamp_window(
+			(const uint8_t *)metricfs_stub_data(), metricfs_stub_size(),
 			0u, true, 5, true, 1u);
 }
 
@@ -1326,8 +1353,27 @@ TEST(PulseReport, ShouldSavePayloadToBacklogWhenTransmitFails)
 	pulse_report();
 
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
-	assert_envelope_payload((const uint8_t *)metricfs_stub_data(), metricfs_stub_size(),
+	assert_envelope_payload_with_same_timestamp_window(
+			(const uint8_t *)metricfs_stub_data(), metricfs_stub_size(),
 			0u, true, 9, true, 1u);
+}
+
+TEST(PulseReport, ShouldOmitWindowStartWhenFirstTimestampedFailureSavesBacklog)
+{
+	fake_timestamp = 1234u;
+	init_pulse_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EIO);
+
+	metrics_set(PulseMetric, METRICS_VALUE(9));
+	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	assert_envelope_payload_with_window((const uint8_t *)metricfs_stub_data(),
+			metricfs_stub_size(), 1234u, 0u, 1234u, true, 9, true,
+			1u);
 }
 
 TEST(PulseReport, ShouldNotSavePayloadToBacklogWhenMfsIsNull)
@@ -2032,8 +2078,27 @@ TEST(PulseReport, ShouldSaveToBacklogOnCancelWhenMfsAvailableAndNotFromStore)
 
 	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_cancel());
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
-	assert_envelope_payload((const uint8_t *)metricfs_stub_data(), metricfs_stub_size(),
+	assert_envelope_payload_with_same_timestamp_window(
+			(const uint8_t *)metricfs_stub_data(), metricfs_stub_size(),
 			0u, true, 5, true, 2u);
+}
+
+TEST(PulseReport, ShouldOmitWindowStartWhenFirstTimestampedCancelSavesBacklog)
+{
+	fake_timestamp = 1234u;
+	init_pulse_async_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EINPROGRESS);
+
+	metrics_set(PulseMetric, METRICS_VALUE(5));
+	CHECK_EQUAL(PULSE_STATUS_IN_PROGRESS, pulse_report());
+	CHECK_EQUAL(PULSE_STATUS_BACKLOG_PENDING, pulse_cancel());
+
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	assert_envelope_payload_with_window((const uint8_t *)metricfs_stub_data(),
+			metricfs_stub_size(), 1234u, 0u, 1234u, true, 5, true, 2u);
 }
 
 TEST(PulseReport, ShouldNotCallPrepareHandlerAgainWhenCancelSavesBacklog)
