@@ -174,6 +174,8 @@ static void update_last_report_time_for_window(uint64_t window_end)
 
 static void finalize_live_metrics_snapshot(uint64_t timestamp)
 {
+	/* NOTE: Metrics recorded after collection and before this reset are
+	 * not included in either the transmitted or saved snapshot. */
 	metrics_reset();
 	update_last_report_time_for_window(timestamp);
 }
@@ -472,8 +474,11 @@ static pulse_status_t save_aborted_flight_to_backlog(int txn_err,
 	return PULSE_STATUS_OK;
 }
 
-static pulse_status_t abort_flight(int txn_err, uint64_t now)
+static pulse_status_t abort_flight(int txn_err)
 {
+	/* Re-read time at abort so slow transports do not finalize against
+	 * the earlier collection timestamp. */
+	const uint64_t now = metrics_get_unix_timestamp();
 	bool saved = false;
 
 	if (!m.flight_from_backlog && m.conf.mfs != NULL) {
@@ -500,7 +505,7 @@ static pulse_status_t abort_flight(int txn_err, uint64_t now)
 	return map_metrics_report_error(txn_err);
 }
 
-static pulse_status_t commit_flight(uint64_t live_timestamp)
+static pulse_status_t commit_flight(void)
 {
 	const bool was_from_backlog = m.flight_from_backlog;
 	const bool live_presave_during_flight = m.live_presave_during_flight;
@@ -509,7 +514,9 @@ static pulse_status_t commit_flight(uint64_t live_timestamp)
 	if (m.flight_from_backlog) {
 		err = metricfs_del_first(m.conf.mfs, NULL);
 	} else if (!live_presave_during_flight) {
-		finalize_live_metrics_snapshot(live_timestamp);
+		/* Use transmit completion time, not collection time, for the
+		 * next report interval after a blocking transport call. */
+		finalize_live_metrics_snapshot(metrics_get_unix_timestamp());
 	}
 
 	clear_in_flight();
@@ -747,19 +754,19 @@ static pulse_status_t do_collect(uint64_t now)
 	return status;
 }
 
-static pulse_status_t do_transmit(uint64_t now)
+static pulse_status_t do_transmit(void)
 {
 	int err = pulse_transport_transmit(m.flight_buf, m.flight_len, &m);
 
 	if (err == 0) {
-		return commit_flight(now);
+		return commit_flight();
 	}
 
 	if (err == -EINPROGRESS) {
 		return PULSE_STATUS_IN_PROGRESS;
 	}
 
-	return abort_flight(err, now);
+	return abort_flight(err);
 }
 
 pulse_status_t pulse_update_token(const char *token)
@@ -827,7 +834,7 @@ static pulse_status_t report_in_flight(uint64_t now)
 		(void)save_live_metrics_to_backlog(now);
 	}
 
-	return do_transmit(now);
+	return do_transmit();
 }
 
 static pulse_status_t check_live_report_interval(uint64_t now)
@@ -865,7 +872,7 @@ pulse_status_t pulse_report(void)
 		return status;
 	}
 
-	return do_transmit(now);
+	return do_transmit();
 }
 
 LIBMCU_WEAK void pulse_transport_cancel(void) {}
@@ -878,7 +885,7 @@ pulse_status_t pulse_cancel(void)
 
 	pulse_transport_cancel();
 
-	return abort_flight(-ECANCELED, metrics_get_unix_timestamp());
+	return abort_flight(-ECANCELED);
 }
 
 const char *pulse_stringify_status(pulse_status_t status)

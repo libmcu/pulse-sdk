@@ -25,6 +25,8 @@ static const struct pulse_report_ctx *last_transmit_ctx;
 #define TEST_VERSION "1.0.0"
 
 static uint64_t fake_timestamp;
+static uint64_t fake_transmit_completion_timestamp;
+static bool fake_transmit_updates_timestamp;
 static unsigned int transport_cancel_calls;
 static unsigned int prepare_handler_calls;
 static unsigned int prepare_order;
@@ -48,9 +50,16 @@ extern "C" int pulse_transport_transmit(const void *data, size_t datasize,
 		transmitted_payload_len = datasize;
 	}
 
-	return mock().actualCall("pulse_transport_transmit")
+	const int ret = mock().actualCall("pulse_transport_transmit")
 		.withParameter("datasize", datasize)
 		.returnIntValue();
+
+	if (fake_transmit_updates_timestamp) {
+		fake_timestamp = fake_transmit_completion_timestamp;
+		fake_transmit_updates_timestamp = false;
+	}
+
+	return ret;
 }
 
 extern "C" void pulse_transport_cancel(void)
@@ -375,6 +384,8 @@ TEST_GROUP(PulseReport)
 		transmitted_payload_len = 0u;
 		last_transmit_ctx = NULL;
 		fake_timestamp = 0u;
+		fake_transmit_completion_timestamp = 0u;
+		fake_transmit_updates_timestamp = false;
 		transport_cancel_calls = 0u;
 		prepare_handler_calls = 0u;
 		prepare_order = 0u;
@@ -443,6 +454,32 @@ TEST(PulseReport, ShouldIncludeWindowStartForSubsequentTimestampedReport)
 	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
 	assert_envelope_payload_with_window(transmitted_payload, transmitted_payload_len,
 			5678u, 1234u, 5678u, true, 100, false, 0u);
+}
+
+TEST(PulseReport, ShouldUseTransmitCompletionTimeForNextReportInterval)
+{
+	fake_timestamp = 1000u;
+	fake_transmit_completion_timestamp = 1300u;
+	fake_transmit_updates_timestamp = true;
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	metrics_set(PulseMetric, METRICS_VALUE(1));
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+
+	fake_timestamp = 1000u + 3600u;
+	metrics_set(PulseMetric, METRICS_VALUE(2));
+	CHECK_EQUAL(PULSE_STATUS_TOO_SOON, pulse_report());
+
+	fake_timestamp = 1300u + 3600u;
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(0);
+	CHECK_EQUAL(PULSE_STATUS_OK, pulse_report());
+	assert_envelope_payload_with_window(transmitted_payload, transmitted_payload_len,
+			1300u + 3600u, 1300u, 1300u + 3600u,
+			true, 2, false, 0u);
 }
 
 TEST(PulseReport, ShouldPreferExplicitMetadataFromConfig)
@@ -1383,6 +1420,26 @@ TEST(PulseReport, ShouldOmitWindowStartWhenFirstTimestampedFailureSavesBacklog)
 	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
 	assert_envelope_payload_with_window((const uint8_t *)metricfs_stub_data(),
 			metricfs_stub_size(), 1234u, 0u, 1234u, true, 9, true,
+			1u);
+}
+
+TEST(PulseReport, ShouldUseTransmitCompletionTimeWhenFailureSavesBacklog)
+{
+	fake_timestamp = 1234u;
+	fake_transmit_completion_timestamp = 1250u;
+	fake_transmit_updates_timestamp = true;
+	init_pulse_with_mfs();
+
+	mock().expectOneCall("pulse_transport_transmit")
+		.ignoreOtherParameters()
+		.andReturnValue(-EIO);
+
+	metrics_set(PulseMetric, METRICS_VALUE(9));
+	CHECK_EQUAL(PULSE_STATUS_IO, pulse_report());
+
+	CHECK_EQUAL(1u, metricfs_count((const struct metricfs *)(uintptr_t)1));
+	assert_envelope_payload_with_window((const uint8_t *)metricfs_stub_data(),
+			metricfs_stub_size(), 1250u, 0u, 1250u, true, 9, true,
 			1u);
 }
 
