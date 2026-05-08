@@ -23,16 +23,20 @@ extern "C" {
 #define PULSE_INGEST_PORT_COAPS	5684u
 
 struct pulse_report_ctx {
+	/* Configuration */
 	void *user_ctx;
 	struct pulse conf;
 
+	/* Callback hooks */
 	pulse_response_handler_t on_response;
 	void *response_ctx;
 	pulse_prepare_handler_t on_prepare;
 	void *prepare_ctx;
 
+	/* Report timing */
 	uint64_t last_report_time;
 
+	/* In-flight payload */
 	uint8_t *flight_buf;
 	size_t flight_len;
 	size_t flight_bufsize;
@@ -43,6 +47,7 @@ struct pulse_report_ctx {
 	bool live_presave_during_flight;
 	bool in_flight;
 
+	/* Lifecycle */
 	bool initialized;
 	bool periodic_initialized;
 };

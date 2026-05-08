@@ -19,6 +19,13 @@
 #include "pulse/pulse.h"
 #include "pulse/pulse_internal.h"
 
+#if !defined(PULSE_WARN)
+#define PULSE_WARN(...)
+#endif
+#if !defined(PULSE_ERROR)
+#define PULSE_ERROR(...)
+#endif
+
 #define PULSE_HTTPS_TIMEOUT_MS		60000U
 #define PULSE_HTTPS_BUFFER_SIZE		4096U
 #define PULSE_HTTPS_CONTENT_TYPE	"application/cbor"
@@ -302,26 +309,31 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 	int ret;
 
 	if (data == NULL || datasize == 0u) {
+		PULSE_WARN("https transmit invalid args: err=%d", -EINVAL);
 		return -EINVAL;
 	}
 
 	if (datasize > (size_t)INT32_MAX) {
+		PULSE_ERROR("https transmit overflow: err=%d", -EOVERFLOW);
 		return -EOVERFLOW;
 	}
 
 	if (conf != NULL && conf->async_transport) {
+		PULSE_WARN("https async not supported: err=%d", -ENOTSUP);
 		return -ENOTSUP;
 	}
 
 	reset_session(&m_session);
 	ret = get_http_timeout_ms(conf, &timeout_ms);
 	if (ret < 0) {
+		PULSE_ERROR("https timeout invalid: err=%d", ret);
 		return ret;
 	}
 
 	init_request_headers(&m_session.headers);
 	ret = build_auth_header(&m_session.headers, conf);
 	if (ret < 0) {
+		PULSE_ERROR("https auth header failed: err=%d", ret);
 		reset_session(&m_session);
 		return ret;
 	}
@@ -329,6 +341,7 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 	m_session.sock = connect_socket(timeout_ms);
 	if (m_session.sock < 0) {
 		ret = m_session.sock;
+		PULSE_ERROR("https connect failed: err=%d", ret);
 		reset_session(&m_session);
 		return ret;
 	}
@@ -338,22 +351,27 @@ int pulse_transport_transmit(const void *data, size_t datasize,
 	close_socket_if_open(&m_session);
 
 	if (m_session.response.truncated) {
+		PULSE_ERROR("https response truncated: err=%d", -EMSGSIZE);
 		reset_session(&m_session);
 		return -EMSGSIZE;
 	}
 
 	if (ret < 0) {
+		PULSE_ERROR("https request failed: err=%d", ret);
 		reset_session(&m_session);
 		return ret;
 	}
 
 	if (!m_session.response.got_response) {
+		PULSE_ERROR("https no response: err=%d", -EIO);
 		reset_session(&m_session);
 		return -EIO;
 	}
 
 	ret = map_http_status_code(m_session.response.status_code);
 	if (ret < 0) {
+		PULSE_ERROR("https status failed: status=%u",
+				(unsigned int)m_session.response.status_code);
 		reset_session(&m_session);
 		return ret;
 	}
