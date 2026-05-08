@@ -13,6 +13,7 @@ extern "C" {
 #include <string.h>
 
 #include "coap3/coap.h"
+#include "esp_timer.h"
 #include "psa/crypto.h"
 
 #include "pulse/pulse.h"
@@ -48,6 +49,7 @@ TEST_GROUP(PulseTransportCoapsEspIdf)
 		memset(g_response_buf, 0, sizeof(g_response_buf));
 		g_response_len = 0u;
 		coap_mock_reset();
+		esp_timer_mock_reset();
 		psa_crypto_mock_reset();
 		pulse_transport_cancel();
 	}
@@ -125,6 +127,33 @@ TEST(PulseTransportCoapsEspIdf,
 			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
 
 	CHECK_EQUAL(-EINPROGRESS,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+}
+
+TEST(PulseTransportCoapsEspIdf,
+		ShouldReturnTimeoutWhenAsyncNoResponseExceedsTransmitTimeout)
+{
+	static const uint8_t payload[] = { 0x01 };
+
+	g_ctx.conf.token = VALID_TOKEN;
+	g_ctx.conf.async_transport = true;
+	g_ctx.conf.transmit_timeout_ms = 1u;
+	coap_mock_suppress_response();
+	esp_timer_mock_set_time(0);
+
+	CHECK_EQUAL(-EINPROGRESS,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+	CHECK_EQUAL(-EINPROGRESS,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+
+	esp_timer_mock_set_time(2000);
+
+	CHECK_EQUAL(-ETIMEDOUT,
+			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
+
+	coap_mock_allow_response();
+
+	CHECK_EQUAL(0,
 			pulse_transport_transmit(payload, sizeof(payload), &g_ctx));
 }
 

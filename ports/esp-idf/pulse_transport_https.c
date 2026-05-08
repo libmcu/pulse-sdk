@@ -37,6 +37,7 @@ typedef struct {
 typedef struct {
 	esp_http_client_handle_t client;
 	response_buf_t response;
+	uint64_t start_us;
 	https_state_t state;
 } https_session_t;
 
@@ -169,6 +170,7 @@ static void deliver_response(const response_buf_t *rb,
 static void reset_session(https_session_t *s)
 {
 	s->client = NULL;
+	s->start_us = 0u;
 	s->state = STATE_IDLE;
 	memset(&s->response, 0, sizeof(s->response));
 }
@@ -213,9 +215,15 @@ static int start_session(https_session_t *s, const void *data, size_t datasize,
 		return map_esp_error(err);
 	}
 
+	s->start_us = async ? (uint64_t)esp_timer_get_time() : 0u;
 	s->state = STATE_IN_PROGRESS;
 
 	return 0;
+}
+
+static bool has_session_timed_out(uint64_t start_us, uint64_t timeout_us)
+{
+	return ((uint64_t)esp_timer_get_time() - start_us) >= timeout_us;
 }
 
 static int advance_session(https_session_t *s,
@@ -224,17 +232,19 @@ static int advance_session(https_session_t *s,
 	const struct pulse *conf = rctx ? &rctx->conf : NULL;
 	const uint64_t timeout_us =
 		(uint64_t)get_transmit_timeout_ms(conf) * 1000u;
-	const uint64_t start_us = async ? 0u : (uint64_t)esp_timer_get_time();
+	const uint64_t start_us = async
+		? s->start_us : (uint64_t)esp_timer_get_time();
 	esp_err_t err;
 
 	do {
 		err = esp_http_client_perform(s->client);
-		if (((uint64_t)esp_timer_get_time() - start_us) >= timeout_us) {
+		if (has_session_timed_out(start_us, timeout_us)) {
 			break;
 		}
 	} while (!async && err == ESP_ERR_HTTP_EAGAIN);
 
-	if (!async && err == ESP_ERR_HTTP_EAGAIN) {
+	if (err == ESP_ERR_HTTP_EAGAIN &&
+			has_session_timed_out(start_us, timeout_us)) {
 		esp_http_client_cleanup(s->client);
 		reset_session(s);
 		return -ETIMEDOUT;
